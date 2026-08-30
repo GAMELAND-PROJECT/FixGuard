@@ -100,6 +100,7 @@ class TunnelListFragment : BaseFragment() {
         binding = TunnelListFragmentBinding.inflate(inflater, container, false)
         val bottomSheet = AddTunnelsSheet()
         binding?.apply {
+            optimizeWarpFab.setOnClickListener { optimizeWarpEndpoint() }
             createFab.setOnClickListener {
                 if (childFragmentManager.findFragmentByTag("BOTTOM_SHEET") != null)
                     return@setOnClickListener
@@ -235,6 +236,37 @@ class TunnelListFragment : BaseFragment() {
         }
     }
 
+    private fun optimizeWarpEndpoint() {
+        val currentBinding = binding ?: return
+        currentBinding.optimizeWarpFab.isEnabled = false
+        showSnackbar(getString(R.string.warp_endpoint_scanning))
+        viewLifecycleOwner.lifecycleScope.launch {
+            runCatching {
+                val manager = Application.getTunnelManager()
+                val tunnels = manager.getTunnels()
+                val ordered = listOfNotNull(selectedTunnel) + tunnels.filter { it != selectedTunnel }
+                val provisioner = WarpProvisioner(requireContext())
+                var lastMismatch: Throwable? = null
+                for (tunnel in ordered) {
+                    try {
+                        val optimized = provisioner.optimizeProfile(tunnel.getConfigAsync())
+                        tunnel.setConfigAsync(optimized.config)
+                        return@runCatching tunnel to optimized.endpoints.primary
+                    } catch (error: IllegalArgumentException) {
+                        lastMismatch = error
+                    }
+                }
+                throw lastMismatch ?: IllegalStateException("No WARP profile exists")
+            }.onSuccess { (tunnel, endpoint) ->
+                showSnackbar(getString(R.string.warp_endpoint_updated, tunnel.name, endpoint.authority, endpoint.latencyMs))
+            }.onFailure { error ->
+                Log.e(TAG, "WARP endpoint optimization failed", error)
+                showSnackbar(getString(R.string.warp_endpoint_error, ErrorMessages[error]))
+            }
+            binding?.optimizeWarpFab?.isEnabled = true
+        }
+    }
+
     private fun viewForTunnel(tunnel: ObservableTunnel, tunnels: List<*>): MultiselectableRelativeLayout? {
         return binding?.tunnelList?.findViewHolderForAdapterPosition(tunnels.indexOf(tunnel))?.itemView as? MultiselectableRelativeLayout
     }
@@ -294,6 +326,7 @@ class TunnelListFragment : BaseFragment() {
                 resources = activity!!.resources
             }
             animateFab(binding?.createFab, false)
+            animateFab(binding?.optimizeWarpFab, false)
             mode.menuInflater.inflate(R.menu.tunnel_list_action_mode, menu)
             binding?.tunnelList?.adapter?.notifyDataSetChanged()
             return true
@@ -304,6 +337,7 @@ class TunnelListFragment : BaseFragment() {
             backPressedCallback?.isEnabled = false
             resources = null
             animateFab(binding?.createFab, true)
+            animateFab(binding?.optimizeWarpFab, true)
             checkedItems.clear()
             binding?.tunnelList?.adapter?.notifyDataSetChanged()
         }

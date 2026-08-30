@@ -101,6 +101,10 @@
     <string name="warp_profile_creating">در حال ساخت امن پروفایل WARP…</string>
     <string name="warp_profile_created">پروفایل WARP «%s» ساخته شد</string>
     <string name="warp_profile_error">ساخت پروفایل WARP انجام نشد: %s</string>
+    <string name="warp_endpoint_optimize">پیدا کردن IP بهتر</string>
+    <string name="warp_endpoint_scanning">در حال پیدا کردن سریع‌ترین Endpoint وارپ…</string>
+    <string name="warp_endpoint_updated">پروفایل «%1$s» به‌روزرسانی شد: %2$s (%3$d میلی‌ثانیه)</string>
+    <string name="warp_endpoint_error">به‌روزرسانی Endpoint وارپ انجام نشد: %s</string>
     <string name="create_from_file">واردکردن از طریق پرونده یا آرشیو</string>
     <string name="create_from_qr_code">اسکن از کد QR</string>
     <string name="create_output_dir_error">نمی‌توان دایرکتوری خروجی را ایجاد کرد</string>

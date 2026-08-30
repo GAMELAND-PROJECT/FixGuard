@@ -78,5 +78,15 @@
             android:nextFocusUp="@id/tunnel_list"
             app:srcCompat="@drawable/ic_action_add_white" />
 
+        <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+            android:id="@+id/optimize_warp_fab"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:layout_margin="@dimen/fab_margin"
+            android:contentDescription="@string/warp_endpoint_optimize"
+            android:text="@string/warp_endpoint_optimize"
+            app:icon="@drawable/ic_action_generate" />
+
     </androidx.coordinatorlayout.widget.CoordinatorLayout>
 </layout>

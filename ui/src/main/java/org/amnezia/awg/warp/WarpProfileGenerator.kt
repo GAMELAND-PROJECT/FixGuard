@@ -1,12 +1,14 @@
 package org.amnezia.awg.warp
 
 import org.amnezia.awg.config.Config
+import org.amnezia.awg.config.InetEndpoint
+import org.amnezia.awg.config.Peer
 import java.io.ByteArrayInputStream
 
 /** Produces a conservative WARP-compatible AmneziaWG profile. */
 object WarpProfileGenerator {
-    fun generate(identity: WarpIdentity): Config {
-        val endpoint = identity.endpoint.ifBlank { DEFAULT_ENDPOINT }
+    fun generate(identity: WarpIdentity, endpointOverride: String? = null): Config {
+        val endpoint = endpointOverride ?: identity.endpoint.ifBlank { DEFAULT_ENDPOINT }
         val ipv4Address = identity.ipv4Address.substringBefore('/')
         val ipv6Address = identity.ipv6Address.substringBefore('/')
         val text = """
@@ -32,6 +34,29 @@ object WarpProfileGenerator {
             PersistentKeepalive = 25
         """.trimIndent()
         return Config.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
+    }
+
+    /** Replaces only the WARP peer endpoint, preserving every user-edited profile option. */
+    fun replaceEndpoint(config: Config, peerPublicKey: String, endpoint: String): Config? {
+        var matched = false
+        val peers = config.peers.map { peer ->
+            if (peer.publicKey.toBase64() != peerPublicKey) return@map peer
+            matched = true
+            Peer.Builder()
+                .addAllowedIps(peer.allowedIps)
+                .setPublicKey(peer.publicKey)
+                .setEndpoint(InetEndpoint.parse(endpoint))
+                .apply {
+                    peer.persistentKeepalive.ifPresent { setPersistentKeepalive(it) }
+                    peer.preSharedKey.ifPresent { setPreSharedKey(it) }
+                }
+                .build()
+        }
+        if (!matched) return null
+        return Config.Builder()
+            .setInterface(config.getInterface())
+            .addPeers(peers)
+            .build()
     }
 
     private const val DEFAULT_ENDPOINT = "engage.cloudflareclient.com:2408"
