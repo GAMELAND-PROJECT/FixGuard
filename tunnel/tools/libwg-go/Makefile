@@ -21,27 +21,36 @@ export GOOS := android
 export CGO_ENABLED := 1
 
 GO_VERSION := 1.24.2
+HOST_UNAME_S := $(shell uname -s)
+ifneq ($(filter MSYS_NT% MINGW% CYGWIN%,$(HOST_UNAME_S)),)
+GO_PLATFORM := windows-amd64
+GO_ARCHIVE := go$(GO_VERSION).$(GO_PLATFORM).zip
+GO_DOWNLOAD_BASE := https://mirror.nju.edu.cn/golang
+else
 GO_PLATFORM := $(shell uname -s | tr '[:upper:]' '[:lower:]')-$(NDK_GO_ARCH_MAP_$(shell uname -m))
-GO_TARBALL := go$(GO_VERSION).$(GO_PLATFORM).tar.gz
+GO_ARCHIVE := go$(GO_VERSION).$(GO_PLATFORM).tar.gz
+GO_DOWNLOAD_BASE := https://dl.google.com/go
+endif
 GO_HASH_darwin-amd64 := 238d9c065d09ff6af229d2e3b8b5e85e688318d69f4006fb85a96e41c216ea83
 GO_HASH_darwin-arm64 := b70f8b3c5b4ccb0ad4ffa5ee91cd38075df20fdbd953a1daedd47f50fbcff47a
 GO_HASH_linux-amd64 := 68097bd680839cbc9d464a0edce4f7c333975e27a90246890e9f1078c7e702ad
+GO_HASH_windows-amd64 := 29c553aabee0743e2ffa3e9fa0cda00ef3b3cc4ff0bc92007f31f80fd69892e1
 
 default: $(DESTDIR)/libwg-go.so
 
-$(GRADLE_USER_HOME)/caches/golang/$(GO_TARBALL):
+$(GRADLE_USER_HOME)/caches/golang/$(GO_ARCHIVE):
 	mkdir -p "$(dir $@)"
 	flock "$@.lock" -c ' \
 	[ -f "$@" ] && exit 0; \
-	curl -o "$@.tmp" "https://dl.google.com/go/$(GO_TARBALL)" && \
+	curl --fail --location --retry 3 -o "$@.tmp" "$(GO_DOWNLOAD_BASE)/$(GO_ARCHIVE)" && \
 	echo "$(GO_HASH_$(GO_PLATFORM))  $@.tmp" | sha256sum -c && \
 	mv "$@.tmp" "$@"'
 
-$(BUILDDIR)/go-$(GO_VERSION)/.prepared: $(GRADLE_USER_HOME)/caches/golang/$(GO_TARBALL)
+$(BUILDDIR)/go-$(GO_VERSION)/.prepared: $(GRADLE_USER_HOME)/caches/golang/$(GO_ARCHIVE)
 	mkdir -p "$(dir $@)"
 	flock "$@.lock" -c ' \
 	[ -f "$@" ] && exit 0; \
-	tar -C "$(dir $@)" --strip-components=1 -xzf "$^" && \
+	bsdtar -C "$(dir $@)" --strip-components=1 -xf "$^" && \
 	patch -p1 -f -N -r- -d "$(dir $@)" < goruntime-boottime-over-monotonic.diff && \
 	touch "$@"'
 
