@@ -34,6 +34,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.amnezia.awg.warp.WarpAwgRecovery
 
 /**
  * Maintains and mediates changes to the set of available AmneziaWG tunnels,
@@ -43,6 +46,13 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
     private val context: Context = get()
     private val tunnelMap: ObservableSortedKeyedArrayList<String, ObservableTunnel> = ObservableSortedKeyedArrayList(TunnelComparator)
     private var haveLoaded = false
+    private val recoveryMutex = Mutex()
+    private val awgRecovery = WarpAwgRecovery(context)
+    private val healthMonitor = TunnelHealthMonitor(
+        context,
+        activeTunnel = { tunnelMap.firstOrNull { it.state == Tunnel.State.UP } },
+        recover = ::recoverTunnel,
+    )
 
     private fun addToList(name: String, config: Config?, state: Tunnel.State): ObservableTunnel {
         val tunnel = ObservableTunnel(this, name, config, state)
@@ -100,6 +110,7 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
     }
 
     fun onCreate() {
+        healthMonitor.start(applicationScope)
         applicationScope.launch {
             try {
                 onTunnelsLoaded(withContext(Dispatchers.IO) { configStore.enumerate() }, withContext(Dispatchers.IO) { getBackend().runningTunnelNames })
@@ -108,6 +119,28 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
                 Log.e(TAG, Log.getStackTraceString(e))
             }
         }
+    }
+
+    private suspend fun recoverTunnel(tunnel: ObservableTunnel) = recoveryMutex.withLock {
+        if (tunnel.state != Tunnel.State.UP) return@withLock
+        val backend = getBackend()
+        val currentConfig = tunnel.getConfigAsync()
+        val recoveryConfig = withContext(Dispatchers.IO) {
+            awgRecovery.nextConfig(currentConfig) ?: currentConfig
+        }
+        tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTING)
+        withContext(Dispatchers.IO) {
+            backend.setState(tunnel, Tunnel.State.DOWN, null)
+            kotlinx.coroutines.delay(750)
+            try {
+                backend.setState(tunnel, Tunnel.State.UP, recoveryConfig)
+            } catch (error: Throwable) {
+                runCatching { backend.setState(tunnel, Tunnel.State.UP, currentConfig) }
+                throw error
+            }
+            if (recoveryConfig != currentConfig) configStore.save(tunnel.name, recoveryConfig)
+        }
+        if (recoveryConfig != currentConfig) tunnel.onConfigChanged(recoveryConfig)
     }
 
     private fun setupStatusCallbacks() {

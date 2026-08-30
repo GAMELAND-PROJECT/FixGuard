@@ -2,6 +2,7 @@ package org.amnezia.awg.warp
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -25,7 +26,8 @@ class WarpEndpointScanner(context: Context) {
     private val cache = WarpEndpointCache(appContext)
 
     suspend fun select(apiEndpoint: String, forceRefresh: Boolean = false): WarpEndpointSelection {
-        val networkKey = currentNetworkKey()
+        val network = currentPhysicalNetwork()
+        val networkKey = currentNetworkKey(network)
         if (!forceRefresh) cache.load(networkKey)?.let { return it }
 
         val apiCandidate = parseEndpoint(apiEndpoint)
@@ -34,7 +36,7 @@ class WarpEndpointScanner(context: Context) {
             coroutineScope {
                 val semaphore = Semaphore(MAX_CONCURRENCY)
                 candidates.map { endpoint ->
-                    async { semaphore.withPermit { probe(endpoint) } }
+                    async { semaphore.withPermit { probe(endpoint, network) } }
                 }.awaitAll().filterNotNull()
             }
         }.orEmpty().sortedBy(WarpEndpoint::latencyMs)
@@ -61,10 +63,10 @@ class WarpEndpointScanner(context: Context) {
         return listOfNotNull(apiEndpoint) + generated.shuffled(random)
     }
 
-    private fun probe(endpoint: WarpEndpoint): WarpEndpoint? {
+    private fun probe(endpoint: WarpEndpoint, network: Network?): WarpEndpoint? {
         val started = System.nanoTime()
         return runCatching {
-            Socket().use { socket ->
+            (network?.socketFactory?.createSocket() ?: Socket()).use { socket ->
                 socket.tcpNoDelay = true
                 socket.connect(InetSocketAddress(endpoint.host, PROBE_PORT), CONNECT_TIMEOUT_MS)
             }
@@ -81,9 +83,22 @@ class WarpEndpointScanner(context: Context) {
         return WarpEndpoint(host, port, Long.MAX_VALUE)
     }
 
-    private fun currentNetworkKey(): String {
+    private fun currentPhysicalNetwork(): Network? {
         val manager = appContext.getSystemService(ConnectivityManager::class.java)
-        val network = manager.activeNetwork ?: return "offline"
+        val candidates = manager.allNetworks.filter { network ->
+            val capabilities = manager.getNetworkCapabilities(network) ?: return@filter false
+            !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }
+        return candidates.firstOrNull { network ->
+            manager.getNetworkCapabilities(network)
+                ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        } ?: candidates.firstOrNull()
+    }
+
+    private fun currentNetworkKey(network: Network?): String {
+        if (network == null) return "offline"
+        val manager = appContext.getSystemService(ConnectivityManager::class.java)
         val capabilities = manager.getNetworkCapabilities(network)
         val transport = when {
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "wifi"
