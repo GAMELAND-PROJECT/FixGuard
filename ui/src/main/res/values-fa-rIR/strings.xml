@@ -94,6 +94,13 @@
     <string name="create_bin_dir_error">نمی‌توان دایرکتوری باینری محلی را ایجاد کرد</string>
     <string name="create_downloads_file_error">نمی‌توان در مسیر بارگیری پرونده‌ای ساخت</string>
     <string name="create_empty">ساختن از ابتدا</string>
+    <string name="create_warp_profile">ساخت هوشمند پروفایل WARP</string>
+    <string name="warp_terms_title">ساخت پروفایل WARP</string>
+    <string name="warp_terms_message">یک کلید دستگاه روی همین گوشی تولید می‌شود و فقط کلید عمومی آن مستقیماً در Cloudflare ثبت خواهد شد. با ادامه، تأیید می‌کنید که قوانین استفاده Cloudflare را پذیرفته‌اید.</string>
+    <string name="warp_terms_accept">پذیرش و ساخت</string>
+    <string name="warp_profile_creating">در حال ساخت امن پروفایل WARP…</string>
+    <string name="warp_profile_created">پروفایل WARP «%s» ساخته شد</string>
+    <string name="warp_profile_error">ساخت پروفایل WARP انجام نشد: %s</string>
     <string name="create_from_file">واردکردن از طریق پرونده یا آرشیو</string>
     <string name="create_from_qr_code">اسکن از کد QR</string>
     <string name="create_output_dir_error">نمی‌توان دایرکتوری خروجی را ایجاد کرد</string>

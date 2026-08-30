@@ -64,6 +64,10 @@ class AddTunnelsSheet : BottomSheetDialogFragment() {
                     dismiss()
                     onRequestCreateConfig()
                 }
+                dialog.findViewById<View>(R.id.create_warp)?.setOnClickListener {
+                    dismiss()
+                    onRequestCreateWarpProfile()
+                }
                 dialog.findViewById<View>(R.id.create_from_file)?.setOnClickListener {
                     dismiss()
                     onRequestImportConfig()
@@ -89,6 +93,10 @@ class AddTunnelsSheet : BottomSheetDialogFragment() {
         setFragmentResult(REQUEST_KEY_NEW_TUNNEL, bundleOf(REQUEST_METHOD to REQUEST_CREATE))
     }
 
+    private fun onRequestCreateWarpProfile() {
+        setFragmentResult(REQUEST_KEY_NEW_TUNNEL, bundleOf(REQUEST_METHOD to REQUEST_CREATE_WARP))
+    }
+
     private fun onRequestImportConfig() {
         setFragmentResult(REQUEST_KEY_NEW_TUNNEL, bundleOf(REQUEST_METHOD to REQUEST_IMPORT))
     }
@@ -101,6 +109,7 @@ class AddTunnelsSheet : BottomSheetDialogFragment() {
         const val REQUEST_KEY_NEW_TUNNEL = "request_new_tunnel"
         const val REQUEST_METHOD = "request_method"
         const val REQUEST_CREATE = "request_create"
+        const val REQUEST_CREATE_WARP = "request_create_warp"
         const val REQUEST_IMPORT = "request_import"
         const val REQUEST_SCAN = "request_scan"
     }

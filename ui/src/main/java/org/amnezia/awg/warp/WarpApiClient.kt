@@ -1,0 +1,91 @@
+package org.amnezia.awg.warp
+
+import org.amnezia.awg.crypto.KeyPair
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.time.Instant
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+
+/** Minimal, direct client for the consumer WARP registration API. */
+class WarpApiClient {
+    fun register(keyPair: KeyPair, model: String = "Android"): WarpIdentity {
+        val body = JSONObject()
+            .put("key", keyPair.publicKey.toBase64())
+            .put("fcm_token", "")
+            .put("install_id", "")
+            .put("locale", "en_US")
+            .put("model", model)
+            .put("tos", Instant.now().toString())
+            .put("type", "Android")
+
+        val response = request("$API_URL/$API_VERSION/reg", "POST", body)
+        val account = response.getJSONObject("account")
+        val config = response.getJSONObject("config")
+        val addresses = config.getJSONObject("interface").getJSONObject("addresses")
+        val peer = config.getJSONArray("peers").getJSONObject(0)
+        val endpointObject = peer.getJSONObject("endpoint")
+        val endpoint = endpointObject.optString("host").takeIf(::isValidEndpoint)
+            ?: endpointObject.optString("v4").takeIf(::isValidEndpoint)
+            ?: DEFAULT_ENDPOINT
+
+        return WarpIdentity(
+            privateKey = keyPair.privateKey.toBase64(),
+            deviceId = response.getString("id"),
+            accessToken = response.getString("token"),
+            accountId = account.optString("id"),
+            licenseKey = account.optString("license"),
+            accountType = account.optString("account_type", "free"),
+            createdAt = account.optString("created"),
+            ipv4Address = addresses.getString("v4"),
+            ipv6Address = addresses.getString("v6"),
+            peerPublicKey = peer.getString("public_key"),
+            endpoint = endpoint,
+        )
+    }
+
+    private fun request(url: String, method: String, body: JSONObject): JSONObject {
+        val connection = URL(url).openConnection() as HttpsURLConnection
+        try {
+            connection.sslSocketFactory = SSLContext.getInstance("TLSv1.2").apply { init(null, null, null) }.socketFactory
+            connection.requestMethod = method
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.useCaches = false
+            connection.doOutput = true
+            connection.setRequestProperty("User-Agent", "okhttp/3.12.1")
+            connection.setRequestProperty("CF-Client-Version", "a-6.3-1922")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val status = connection.responseCode
+            val responseText = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) {
+                val message = runCatching { JSONObject(responseText).optString("message") }.getOrNull()
+                throw WarpApiException(status, message?.takeIf { it.isNotBlank() } ?: "WARP registration failed")
+            }
+            return JSONObject(responseText)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun isValidEndpoint(value: String): Boolean {
+        if (value.isBlank()) return false
+        val separator = value.lastIndexOf(':')
+        if (separator <= 0) return false
+        val port = value.substring(separator + 1).toIntOrNull() ?: return false
+        return port in 1..65535
+    }
+
+    private companion object {
+        const val API_URL = "https://api.cloudflareclient.com"
+        const val API_VERSION = "v0a1922"
+        const val DEFAULT_ENDPOINT = "engage.cloudflareclient.com:2408"
+        const val CONNECT_TIMEOUT_MS = 15_000
+        const val READ_TIMEOUT_MS = 30_000
+    }
+}
+
+class WarpApiException(val statusCode: Int, message: String) : Exception(message)

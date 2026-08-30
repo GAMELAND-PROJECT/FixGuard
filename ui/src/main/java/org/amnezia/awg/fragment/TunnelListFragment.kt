@@ -23,6 +23,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.view.ActionMode
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.zxing.qrcode.QRCodeReader
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -37,6 +38,7 @@ import org.amnezia.awg.util.ErrorMessages
 import org.amnezia.awg.util.QrCodeFromFileScanner
 import org.amnezia.awg.util.TunnelImporter
 import org.amnezia.awg.widget.MultiselectableRelativeLayout
+import org.amnezia.awg.warp.WarpProvisioner
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -105,6 +107,10 @@ class TunnelListFragment : BaseFragment() {
                     when (bundle.getString(AddTunnelsSheet.REQUEST_METHOD)) {
                         AddTunnelsSheet.REQUEST_CREATE -> {
                             startActivity(Intent(requireActivity(), TunnelCreatorActivity::class.java))
+                        }
+
+                        AddTunnelsSheet.REQUEST_CREATE_WARP -> {
+                            confirmAndCreateWarpProfile()
                         }
 
                         AddTunnelsSheet.REQUEST_IMPORT -> {
@@ -198,6 +204,35 @@ class TunnelListFragment : BaseFragment() {
                 .show()
         else
             Toast.makeText(activity ?: Application.get(), message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun confirmAndCreateWarpProfile() {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.warp_terms_title)
+            .setMessage(R.string.warp_terms_message)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.warp_terms_accept) { _, _ -> createWarpProfile() }
+            .show()
+    }
+
+    private fun createWarpProfile() {
+        showSnackbar(getString(R.string.warp_profile_creating))
+        viewLifecycleOwner.lifecycleScope.launch {
+            runCatching {
+                val config = WarpProvisioner(requireContext()).createProfile()
+                val manager = Application.getTunnelManager()
+                val tunnels = manager.getTunnels()
+                var name = "WARP"
+                var suffix = 2
+                while (tunnels.containsKey(name)) name = "WARP-${suffix++}"
+                manager.create(name, config)
+            }.onSuccess { tunnel ->
+                showSnackbar(getString(R.string.warp_profile_created, tunnel.name))
+            }.onFailure { error ->
+                Log.e(TAG, "WARP profile creation failed", error)
+                showSnackbar(getString(R.string.warp_profile_error, ErrorMessages[error]))
+            }
+        }
     }
 
     private fun viewForTunnel(tunnel: ObservableTunnel, tunnels: List<*>): MultiselectableRelativeLayout? {

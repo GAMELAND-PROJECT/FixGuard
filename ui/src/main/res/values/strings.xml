@@ -94,6 +94,13 @@
     <string name="create_bin_dir_error">Cannot create local binary directory</string>
     <string name="create_downloads_file_error">Cannot create file in downloads directory</string>
     <string name="create_empty">Create from scratch</string>
+    <string name="create_warp_profile">Create smart WARP profile</string>
+    <string name="warp_terms_title">Create WARP profile</string>
+    <string name="warp_terms_message">A device key will be generated on this device and its public key will be registered directly with Cloudflare. By continuing, you confirm that you accept Cloudflare’s Terms of Service.</string>
+    <string name="warp_terms_accept">Accept and create</string>
+    <string name="warp_profile_creating">Creating secure WARP profile…</string>
+    <string name="warp_profile_created">WARP profile “%s” created</string>
+    <string name="warp_profile_error">Could not create WARP profile: %s</string>
     <string name="create_from_file">Import from file or archive</string>
     <string name="create_from_qr_code">Scan from QR code</string>
     <string name="create_output_dir_error">Cannot create output directory</string>

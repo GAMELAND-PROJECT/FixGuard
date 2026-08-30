@@ -7,6 +7,26 @@
     android:paddingTop="@dimen/bottom_sheet_top_padding">
 
     <com.google.android.material.button.MaterialButton
+        android:id="@+id/create_warp"
+        style="@style/Widget.Material3.Button.TextButton.Icon"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/bottom_sheet_item_height"
+        android:layout_marginStart="@dimen/normal_margin"
+        android:layout_marginEnd="@dimen/normal_margin"
+        android:nextFocusDown="@id/create_from_file"
+        android:nextFocusForward="@id/create_from_file"
+        android:text="@string/create_warp_profile"
+        android:textAlignment="viewStart"
+        android:textColor="?attr/colorOnSurface"
+        app:icon="@drawable/ic_action_generate"
+        app:iconPadding="@dimen/bottom_sheet_icon_padding"
+        app:iconTint="?attr/colorSecondary"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:rippleColor="?attr/colorSecondary" />
+
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/create_from_file"
         style="@style/Widget.Material3.Button.TextButton.Icon"
         android:layout_width="match_parent"
@@ -26,7 +46,7 @@
         app:layout_constraintBottom_toTopOf="@+id/create_from_qrcode"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/create_warp"
         app:rippleColor="?attr/colorSecondary" />
 
     <com.google.android.material.button.MaterialButton
