@@ -47,10 +47,14 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
     private val tunnelMap: ObservableSortedKeyedArrayList<String, ObservableTunnel> = ObservableSortedKeyedArrayList(TunnelComparator)
     private var haveLoaded = false
     private val recoveryMutex = Mutex()
+    @Volatile private var automaticRecoveryPaused = false
     private val awgRecovery = WarpAwgRecovery(context)
     private val healthMonitor = TunnelHealthMonitor(
         context,
-        activeTunnel = { tunnelMap.firstOrNull { it.state == Tunnel.State.UP } },
+        activeTunnel = {
+            if (automaticRecoveryPaused) null
+            else tunnelMap.firstOrNull { it.state == Tunnel.State.UP }
+        },
         recover = ::recoverTunnel,
     )
 
@@ -121,27 +125,43 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
         }
     }
 
-    private suspend fun recoverTunnel(tunnel: ObservableTunnel) = recoveryMutex.withLock {
-        if (tunnel.state != Tunnel.State.UP) return@withLock
-        val backend = getBackend()
-        val currentConfig = tunnel.getConfigAsync()
-        val recoveryConfig = withContext(Dispatchers.IO) {
-            awgRecovery.nextConfig(currentConfig) ?: currentConfig
-        }
-        tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTING)
-        withContext(Dispatchers.IO) {
-            backend.setState(tunnel, Tunnel.State.DOWN, null)
-            kotlinx.coroutines.delay(750)
-            try {
-                backend.setState(tunnel, Tunnel.State.UP, recoveryConfig)
-            } catch (error: Throwable) {
-                runCatching { backend.setState(tunnel, Tunnel.State.UP, currentConfig) }
-                throw error
+    private suspend fun recoverTunnel(tunnel: ObservableTunnel) {
+        // Drop a probe that finished while an intentional connection test owns the backend;
+        // otherwise it could queue on the mutex and restart the newly verified tunnel afterward.
+        if (automaticRecoveryPaused) return
+        recoveryMutex.withLock {
+            if (automaticRecoveryPaused || tunnel.state != Tunnel.State.UP) return@withLock
+            val backend = getBackend()
+            val currentConfig = tunnel.getConfigAsync()
+            val recoveryConfig = withContext(Dispatchers.IO) {
+                awgRecovery.nextConfig(currentConfig) ?: currentConfig
             }
-            if (recoveryConfig != currentConfig) configStore.save(tunnel.name, recoveryConfig)
+            tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTING)
+            withContext(Dispatchers.IO) {
+                backend.setState(tunnel, Tunnel.State.DOWN, null)
+                kotlinx.coroutines.delay(750)
+                try {
+                    backend.setState(tunnel, Tunnel.State.UP, recoveryConfig)
+                } catch (error: Throwable) {
+                    runCatching { backend.setState(tunnel, Tunnel.State.UP, currentConfig) }
+                    throw error
+                }
+                if (recoveryConfig != currentConfig) configStore.save(tunnel.name, recoveryConfig)
+            }
+            if (recoveryConfig != currentConfig) tunnel.onConfigChanged(recoveryConfig)
         }
-        if (recoveryConfig != currentConfig) tunnel.onConfigChanged(recoveryConfig)
     }
+
+    /** Prevents the health monitor from racing an intentional multi-endpoint connection test. */
+    suspend fun <T> withAutomaticRecoveryPaused(block: suspend () -> T): T =
+        recoveryMutex.withLock {
+            automaticRecoveryPaused = true
+            try {
+                block()
+            } finally {
+                automaticRecoveryPaused = false
+            }
+        }
 
     private fun setupStatusCallbacks() {
         applicationScope.launch {
@@ -156,7 +176,7 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
                                 val newStatus = if (connected) {
                                     ObservableTunnel.ConnectionStatus.CONNECTED
                                 } else {
-                                    ObservableTunnel.ConnectionStatus.CONNECTING
+                                    ObservableTunnel.ConnectionStatus.DISCONNECTED
                                 }
                                 activeTunnel.onConnectionStatusChanged(newStatus)
                             }

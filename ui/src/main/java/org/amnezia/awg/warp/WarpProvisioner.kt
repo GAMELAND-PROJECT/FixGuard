@@ -10,21 +10,39 @@ import org.amnezia.awg.crypto.KeyPair
 
 /** Reuses the encrypted registration, creating a new one only when none is available. */
 class WarpProvisioner(context: Context) {
-    private val store = EncryptedWarpIdentityStore(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val store = EncryptedWarpIdentityStore(appContext)
+    private val registrationPreferences = appContext.getSharedPreferences(
+        REGISTRATION_PREFERENCES,
+        Context.MODE_PRIVATE,
+    )
     private val api = WarpApiClient()
     private val endpointScanner = WarpEndpointScanner(context.applicationContext)
 
     suspend fun createProfile(): Config = withContext(Dispatchers.IO) {
         provisionMutex.withLock {
-            val identity = store.load() ?: api.register(KeyPair()).also(store::save)
+            val identity = loadCurrentIdentity()
             val selection = endpointScanner.select(identity.endpoint)
             WarpProfileGenerator.generate(identity, selection.primary.authority)
         }
     }
 
+    /** Returns complete profiles whose endpoints still require a real AWG handshake test. */
+    suspend fun createConnectionCandidates(): List<WarpProfileCandidate> = withContext(Dispatchers.IO) {
+        provisionMutex.withLock {
+            val identity = loadCurrentIdentity()
+            endpointScanner.connectionCandidates(identity.endpoint).map { endpoint ->
+                WarpProfileCandidate(
+                    config = WarpProfileGenerator.generate(identity, endpoint.authority),
+                    endpoint = endpoint,
+                )
+            }
+        }
+    }
+
     suspend fun optimizeProfile(config: Config): OptimizedWarpProfile = withContext(Dispatchers.IO) {
         provisionMutex.withLock {
-            val identity = store.load() ?: throw IllegalStateException("No stored WARP identity")
+            val identity = loadCurrentIdentity(requireExisting = true)
             if (config.peers.none { it.publicKey.toBase64() == identity.peerPublicKey })
                 throw IllegalArgumentException("The selected profile does not belong to the stored WARP identity")
             val selection = endpointScanner.select(identity.endpoint, forceRefresh = true)
@@ -37,12 +55,56 @@ class WarpProvisioner(context: Context) {
         }
     }
 
+    private fun loadCurrentIdentity(requireExisting: Boolean = false): WarpIdentity {
+        val stored = store.load()
+        if (stored == null) {
+            if (requireExisting) throw IllegalStateException("No stored WARP identity")
+            return registerNewIdentity()
+        }
+
+        val current = try {
+            api.refresh(stored).also(store::save)
+        } catch (error: WarpApiException) {
+            if (error.statusCode != 401 && error.statusCode != 404) return stored
+            // The token/device is definitively invalid. Replace it once instead of looping on
+            // transient network, rate-limit, or server failures.
+            registerNewIdentity()
+        } catch (_: java.io.IOException) {
+            // API reachability is not required when an existing cryptographic identity can still
+            // establish a tunnel. The real handshake/data-path test remains authoritative.
+            stored
+        }
+        // These API flags are useful diagnostics but are not an authorization verdict for the
+        // consumer WireGuard tunnel. In particular, `enabled` can be false for a device whose
+        // issued keys still authenticate. A fresh AWG handshake and WARP trace are authoritative.
+        return current
+    }
+
+    private fun registerNewIdentity(): WarpIdentity {
+        val now = System.currentTimeMillis()
+        val lastAttempt = registrationPreferences.getLong(LAST_REGISTRATION_ATTEMPT, 0L)
+        check(now - lastAttempt >= REGISTRATION_COOLDOWN_MS) {
+            "WARP registration is cooling down; try again shortly"
+        }
+        // Persist before the request so failures and repeated taps cannot hammer the API.
+        registrationPreferences.edit().putLong(LAST_REGISTRATION_ATTEMPT, now).apply()
+        return api.register(KeyPair()).also(store::save)
+    }
+
     private companion object {
         val provisionMutex = Mutex()
+        const val REGISTRATION_PREFERENCES = "warp_registration_guard"
+        const val LAST_REGISTRATION_ATTEMPT = "last_attempt"
+        const val REGISTRATION_COOLDOWN_MS = 30_000L
     }
 }
 
 data class OptimizedWarpProfile(
     val config: Config,
     val endpoints: WarpEndpointSelection,
+)
+
+data class WarpProfileCandidate(
+    val config: Config,
+    val endpoint: WarpEndpoint,
 )

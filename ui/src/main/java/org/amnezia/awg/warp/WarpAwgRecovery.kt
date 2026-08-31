@@ -13,11 +13,16 @@ class WarpAwgRecovery(context: Context) {
         val identity = runCatching { store.load() }.getOrNull() ?: return null
         if (config.peers.none { it.publicKey.toBase64() == identity.peerPublicKey }) return null
 
-        val selection = endpointScanner.select(identity.endpoint, forceRefresh = true)
+        val currentEndpoint = config.peers
+            .firstOrNull { it.publicKey.toBase64() == identity.peerPublicKey }
+            ?.endpoint?.orElse(null)?.toString()
+        val candidate = endpointScanner.connectionCandidates(identity.endpoint)
+            .firstOrNull { it.authority != currentEndpoint }
+            ?: return null
         val endpointConfig = WarpProfileGenerator.replaceEndpoint(
             config,
             identity.peerPublicKey,
-            selection.primary.authority,
+            candidate.authority,
         ) ?: return null
 
         val current = endpointConfig.getInterface().specialJunkI1.orElse(null)

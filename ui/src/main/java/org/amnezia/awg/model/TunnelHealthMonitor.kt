@@ -35,6 +35,7 @@ class TunnelHealthMonitor(
 
     private suspend fun monitor() {
         var observedName: String? = null
+        var observedSince = 0L
         var lastRx = 0L
         var lastTx = 0L
         var unansweredSince = 0L
@@ -50,11 +51,13 @@ class TunnelHealthMonitor(
             }
             if (tunnel == null) {
                 observedName = null
+                observedSince = 0L
                 failedProbes = 0
                 continue
             }
             if (observedName != tunnel.name) {
                 observedName = tunnel.name
+                observedSince = System.currentTimeMillis()
                 lastRx = 0
                 lastTx = 0
                 unansweredSince = 0
@@ -82,8 +85,11 @@ class TunnelHealthMonitor(
             lastTx = tx
 
             val handshakeIsOld = handshakeSeconds > 0 && now / 1000 - handshakeSeconds > STALE_HANDSHAKE_SECONDS
+            val handshakeIsMissing = handshakeSeconds <= 0 &&
+                observedSince > 0 && now - observedSince > INITIAL_HANDSHAKE_TIMEOUT_MS
             val outgoingIsUnanswered = unansweredSince > 0 && now - unansweredSince > UNANSWERED_TRAFFIC_MS
-            if ((!handshakeIsOld && !outgoingIsUnanswered) || now - lastProbeAt < PROBE_INTERVAL_MS)
+            if ((!handshakeIsOld && !handshakeIsMissing && !outgoingIsUnanswered) ||
+                now - lastProbeAt < PROBE_INTERVAL_MS)
                 continue
             if (!hasPhysicalInternet()) continue
 
@@ -149,6 +155,7 @@ class TunnelHealthMonitor(
         const val UNANSWERED_TRAFFIC_MS = 30_000L
         const val MEANINGFUL_TX_BYTES = 512L
         const val STALE_HANDSHAKE_SECONDS = 180L
+        const val INITIAL_HANDSHAKE_TIMEOUT_MS = 30_000L
         const val REQUIRED_FAILURES = 2
         const val RECOVERY_COOLDOWN_MS = 60_000L
         const val RECOVERY_WINDOW_MS = 10 * 60_000L

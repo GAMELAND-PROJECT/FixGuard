@@ -27,11 +27,14 @@ class WarpEndpointScanner(context: Context) {
 
     suspend fun select(apiEndpoint: String, forceRefresh: Boolean = false): WarpEndpointSelection {
         val network = currentPhysicalNetwork()
-        val networkKey = currentNetworkKey(network)
+        val apiCandidate = parseEndpoint(apiEndpoint)
+        val selectedPort = apiCandidate?.port?.takeIf(WARP_PORTS::contains) ?: DEFAULT_PORT
+        // Include the algorithm version and port in the key so selections written by the old
+        // random-port implementation can never be restored from cache.
+        val networkKey = "${currentNetworkKey(network)}:warp-port-v2:$selectedPort"
         if (!forceRefresh) cache.load(networkKey)?.let { return it }
 
-        val apiCandidate = parseEndpoint(apiEndpoint)
-        val candidates = buildCandidates(apiCandidate)
+        val candidates = buildCandidates(apiCandidate, selectedPort)
         val measured = withTimeoutOrNull(SCAN_BUDGET_MS) {
             coroutineScope {
                 val semaphore = Semaphore(MAX_CONCURRENCY)
@@ -45,22 +48,45 @@ class WarpEndpointScanner(context: Context) {
         val selected = if (winners.isNotEmpty()) {
             WarpEndpointSelection(winners.first(), winners.drop(1))
         } else {
-            val safe = apiCandidate ?: WarpEndpoint(DEFAULT_HOST, DEFAULT_PORT, Long.MAX_VALUE)
+            val safe = apiCandidate
+                ?.copy(port = selectedPort)
+                ?: WarpEndpoint(DEFAULT_HOST, DEFAULT_PORT, Long.MAX_VALUE)
             WarpEndpointSelection(safe, emptyList())
         }
         cache.save(networkKey, selected)
         return selected
     }
 
-    private fun buildCandidates(apiEndpoint: WarpEndpoint?): List<WarpEndpoint> {
+    /**
+     * Produces a small, deterministic set for a real tunnel-handshake test. TCP ranking chooses
+     * the hosts; the caller must validate these official UDP ports with the AWG backend itself.
+     */
+    suspend fun connectionCandidates(apiEndpoint: String): List<WarpEndpoint> {
+        val selection = select(apiEndpoint, forceRefresh = true)
+        val apiCandidate = parseEndpoint(apiEndpoint)
+        val endpoints = (listOfNotNull(apiCandidate) + selection.primary + selection.fallbacks)
+            .distinctBy(WarpEndpoint::host)
+        val preferredPort = apiCandidate?.port?.takeIf(WARP_PORTS::contains)
+            ?: DEFAULT_PORT
+        val orderedPorts = listOf(preferredPort) + WARP_PORTS.filterNot { it == preferredPort }
+        return buildList {
+            // First try the API-issued/default port across all routes. Only then spend time on
+            // fallback ports. This minimizes time-to-first-handshake on normal networks.
+            orderedPorts.forEach { port ->
+                endpoints.forEach { endpoint -> add(endpoint.copy(port = port)) }
+            }
+        }.distinctBy(WarpEndpoint::authority).take(MAX_HANDSHAKE_CANDIDATES)
+    }
+
+    private fun buildCandidates(apiEndpoint: WarpEndpoint?, selectedPort: Int): List<WarpEndpoint> {
         val random = Random(System.nanoTime())
         val generated = WARP_IPV4_PREFIXES.flatMap { prefix ->
             (1..SAMPLES_PER_PREFIX).map {
                 val host = "$prefix.${random.nextInt(1, 255)}"
-                WarpEndpoint(host, COMMON_PORTS[random.nextInt(COMMON_PORTS.size)], Long.MAX_VALUE)
+                WarpEndpoint(host, selectedPort, Long.MAX_VALUE)
             }
         }
-        return listOfNotNull(apiEndpoint) + generated.shuffled(random)
+        return listOfNotNull(apiEndpoint?.copy(port = selectedPort)) + generated.shuffled(random)
     }
 
     private fun probe(endpoint: WarpEndpoint, network: Network?): WarpEndpoint? {
@@ -119,8 +145,11 @@ class WarpEndpointScanner(context: Context) {
         // 32 generated candidates fit in five 800 ms waves with concurrency 8.
         const val SAMPLES_PER_PREFIX = 4
         const val RESULT_COUNT = 3
+        const val MAX_HANDSHAKE_CANDIDATES = 6
 
-        val COMMON_PORTS = intArrayOf(2408, 500, 1701, 4500)
+        // Official Cloudflare WireGuard/WARP ports: UDP 2408 is the default and the remaining
+        // values are documented fallbacks. Never persist an arbitrary port in a WARP profile.
+        val WARP_PORTS = listOf(2408, 500, 1701, 4500)
         val WARP_IPV4_PREFIXES = listOf(
             "162.159.192", "162.159.193", "162.159.195", "162.159.204",
             "188.114.96", "188.114.97", "188.114.98", "188.114.99",

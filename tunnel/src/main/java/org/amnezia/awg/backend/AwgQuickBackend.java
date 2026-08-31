@@ -30,6 +30,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import androidx.annotation.Nullable;
 
@@ -41,6 +42,7 @@ import androidx.annotation.Nullable;
 @NonNullForAll
 public final class AwgQuickBackend implements Backend {
     private static final String TAG = "AmneziaWG/AwgQuickBackend";
+    private static final long HANDSHAKE_STATUS_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
     private final File localTemporaryDir;
     private final RootShell rootShell;
     private final Map<Tunnel, Config> runningConfigs = new HashMap<>();
@@ -128,7 +130,14 @@ public final class AwgQuickBackend implements Backend {
         stopStatusJob();
         Log.d(TAG, "Launch status job");
         statusThread = new Thread(() -> {
+            final long deadline = System.nanoTime() + HANDSHAKE_STATUS_TIMEOUT_NANOS;
             while (!Thread.currentThread().isInterrupted()) {
+                if (System.nanoTime() >= deadline) {
+                    Log.w(TAG, "Timed out waiting for the first handshake");
+                    if (statusCallback != null)
+                        statusCallback.onStatusChanged(false);
+                    break;
+                }
                 final long lastHandshake = getLastHandshake(currentTunnel);
 
                 // Check if tunnel is no longer active (race condition protection)
@@ -216,7 +225,7 @@ public final class AwgQuickBackend implements Backend {
     }
 
     @Override
-    public State setState(final Tunnel tunnel, State state, @Nullable final Config config) throws Exception {
+    public synchronized State setState(final Tunnel tunnel, State state, @Nullable final Config config) throws Exception {
         final State originalState = getState(tunnel);
         final Config originalConfig = runningConfigs.get(tunnel);
         final Map<Tunnel, Config> runningConfigsSnapshot = new HashMap<>(runningConfigs);

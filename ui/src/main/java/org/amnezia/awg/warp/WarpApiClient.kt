@@ -21,6 +21,20 @@ class WarpApiClient {
             .put("type", "Android")
 
         val response = request("$API_URL/$API_VERSION/reg", "POST", body)
+        return parseIdentity(response, keyPair.privateKey.toBase64(), response.getString("token"))
+    }
+
+    /** Fetches the authoritative device state and latest tunnel configuration. */
+    fun refresh(identity: WarpIdentity): WarpIdentity {
+        val response = request(
+            "$API_URL/$API_VERSION/reg/${identity.deviceId}",
+            method = "GET",
+            accessToken = identity.accessToken,
+        )
+        return parseIdentity(response, identity.privateKey, identity.accessToken)
+    }
+
+    private fun parseIdentity(response: JSONObject, privateKey: String, accessToken: String): WarpIdentity {
         val account = response.getJSONObject("account")
         val config = response.getJSONObject("config")
         val addresses = config.getJSONObject("interface").getJSONObject("addresses")
@@ -31,9 +45,9 @@ class WarpApiClient {
             ?: DEFAULT_ENDPOINT
 
         return WarpIdentity(
-            privateKey = keyPair.privateKey.toBase64(),
+            privateKey = privateKey,
             deviceId = response.getString("id"),
-            accessToken = response.getString("token"),
+            accessToken = accessToken,
             accountId = account.optString("id"),
             licenseKey = account.optString("license"),
             accountType = account.optString("account_type", "free"),
@@ -42,10 +56,18 @@ class WarpApiClient {
             ipv6Address = addresses.getString("v6"),
             peerPublicKey = peer.getString("public_key"),
             endpoint = endpoint,
+            enabled = response.optBoolean("enabled", true),
+            warpEnabled = response.optBoolean("warp_enabled", true),
+            updatedAt = response.optString("updated"),
         )
     }
 
-    private fun request(url: String, method: String, body: JSONObject): JSONObject {
+    private fun request(
+        url: String,
+        method: String,
+        body: JSONObject? = null,
+        accessToken: String? = null,
+    ): JSONObject {
         val connection = URL(url).openConnection() as HttpsURLConnection
         try {
             connection.sslSocketFactory = SSLContext.getInstance("TLSv1.2").apply { init(null, null, null) }.socketFactory
@@ -53,17 +75,20 @@ class WarpApiClient {
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
             connection.useCaches = false
-            connection.doOutput = true
+            connection.doOutput = body != null
             connection.setRequestProperty("User-Agent", "okhttp/3.12.1")
             connection.setRequestProperty("CF-Client-Version", "a-6.3-1922")
             connection.setRequestProperty("Content-Type", "application/json")
-            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            accessToken?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+            body?.let { payload ->
+                connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+            }
             val status = connection.responseCode
             val responseText = (if (status in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (status !in 200..299) {
                 val message = runCatching { JSONObject(responseText).optString("message") }.getOrNull()
-                throw WarpApiException(status, message?.takeIf { it.isNotBlank() } ?: "WARP registration failed")
+                throw WarpApiException(status, message?.takeIf { it.isNotBlank() } ?: "WARP API request failed")
             }
             return JSONObject(responseText)
         } finally {

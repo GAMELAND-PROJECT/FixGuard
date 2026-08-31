@@ -44,6 +44,7 @@ import static org.amnezia.awg.GoBackend.*;
 @NonNullForAll
 public final class GoBackend implements Backend {
     private static final int DNS_RESOLUTION_RETRIES = 10;
+    private static final long HANDSHAKE_STATUS_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
     private static final String TAG = "AmneziaWG/GoBackend";
     @Nullable private static AlwaysOnCallback alwaysOnCallback;
     private static GhettoCompletableFuture<VpnService> vpnService = new GhettoCompletableFuture<>();
@@ -220,7 +221,14 @@ public final class GoBackend implements Backend {
         stopStatusJob();
         Log.d(TAG, "Launch status job");
         statusThread = new Thread(() -> {
+            final long deadline = System.nanoTime() + HANDSHAKE_STATUS_TIMEOUT_NANOS;
             while (!Thread.currentThread().isInterrupted()) {
+                if (System.nanoTime() >= deadline) {
+                    Log.w(TAG, "Timed out waiting for the first handshake");
+                    if (statusCallback != null)
+                        statusCallback.onStatusChanged(false);
+                    break;
+                }
                 final long lastHandshake = getLastHandshake(currentTunnel);
 
                 // Check if tunnel is no longer active (race condition protection)
@@ -294,7 +302,7 @@ public final class GoBackend implements Backend {
      * @throws Exception Exception raised while changing tunnel state.
      */
     @Override
-    public State setState(final Tunnel tunnel, State state, @Nullable final Config config) throws Exception {
+    public synchronized State setState(final Tunnel tunnel, State state, @Nullable final Config config) throws Exception {
         final State originalState = getState(tunnel);
 
         if (state == State.TOGGLE)

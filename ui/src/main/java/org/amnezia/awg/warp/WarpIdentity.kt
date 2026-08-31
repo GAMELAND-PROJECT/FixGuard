@@ -13,4 +13,7 @@ data class WarpIdentity(
     val ipv6Address: String,
     val peerPublicKey: String,
     val endpoint: String,
+    val enabled: Boolean = true,
+    val warpEnabled: Boolean = true,
+    val updatedAt: String = "",
 )

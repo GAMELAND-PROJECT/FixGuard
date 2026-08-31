@@ -87,6 +87,9 @@ class EncryptedWarpIdentityStore(private val context: Context) {
         .put("ipv6Address", value.ipv6Address)
         .put("peerPublicKey", value.peerPublicKey)
         .put("endpoint", value.endpoint)
+        .put("enabled", value.enabled)
+        .put("warpEnabled", value.warpEnabled)
+        .put("updatedAt", value.updatedAt)
 
     private fun decode(value: JSONObject) = WarpIdentity(
         privateKey = value.getString("privateKey"),
@@ -100,6 +103,9 @@ class EncryptedWarpIdentityStore(private val context: Context) {
         ipv6Address = value.getString("ipv6Address"),
         peerPublicKey = value.getString("peerPublicKey"),
         endpoint = value.getString("endpoint"),
+        enabled = value.optBoolean("enabled", true),
+        warpEnabled = value.optBoolean("warpEnabled", true),
+        updatedAt = value.optString("updatedAt"),
     )
 
     private companion object {
