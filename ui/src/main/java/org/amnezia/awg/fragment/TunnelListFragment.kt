@@ -8,6 +8,7 @@ import android.content.Intent
 import android.app.Activity
 import android.content.res.Resources
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.Menu
@@ -24,7 +25,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.view.ActionMode
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.zxing.qrcode.QRCodeReader
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -42,6 +42,7 @@ import org.amnezia.awg.util.QrCodeFromFileScanner
 import org.amnezia.awg.util.TunnelImporter
 import org.amnezia.awg.widget.MultiselectableRelativeLayout
 import org.amnezia.awg.warp.WarpProvisioner
+import org.amnezia.awg.warp.WarpProfileCandidate
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -114,7 +115,7 @@ class TunnelListFragment : BaseFragment() {
         binding = TunnelListFragmentBinding.inflate(inflater, container, false)
         val bottomSheet = AddTunnelsSheet()
         binding?.apply {
-            optimizeWarpFab.setOnClickListener { confirmAndCreateVerifiedWarpProfile() }
+            optimizeWarpFab.setOnClickListener { prepareVerifiedWarpProfile() }
             createFab.setOnClickListener {
                 if (childFragmentManager.findFragmentByTag("BOTTOM_SHEET") != null)
                     return@setOnClickListener
@@ -125,7 +126,7 @@ class TunnelListFragment : BaseFragment() {
                         }
 
                         AddTunnelsSheet.REQUEST_CREATE_WARP -> {
-                            confirmAndCreateWarpProfile()
+                            createWarpProfile()
                         }
 
                         AddTunnelsSheet.REQUEST_IMPORT -> {
@@ -221,15 +222,6 @@ class TunnelListFragment : BaseFragment() {
             Toast.makeText(activity ?: Application.get(), message, Toast.LENGTH_SHORT).show()
     }
 
-    private fun confirmAndCreateWarpProfile() {
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.warp_terms_title)
-            .setMessage(R.string.warp_terms_message)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.warp_terms_accept) { _, _ -> createWarpProfile() }
-            .show()
-    }
-
     private fun createWarpProfile() {
         showSnackbar(getString(R.string.warp_profile_creating))
         viewLifecycleOwner.lifecycleScope.launch {
@@ -248,15 +240,6 @@ class TunnelListFragment : BaseFragment() {
                 showSnackbar(getString(R.string.warp_profile_error, ErrorMessages[error]))
             }
         }
-    }
-
-    private fun confirmAndCreateVerifiedWarpProfile() {
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.warp_verified_title)
-            .setMessage(R.string.warp_verified_message)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.warp_verified_action) { _, _ -> prepareVerifiedWarpProfile() }
-            .show()
     }
 
     private fun prepareVerifiedWarpProfile() {
@@ -291,7 +274,8 @@ class TunnelListFragment : BaseFragment() {
                     runCatching {
                         val tunnels = manager.getTunnels()
                         previouslyActive = tunnels.firstOrNull { it.state == Tunnel.State.UP }
-                        val candidates = WarpProvisioner(requireContext()).createConnectionCandidates()
+                        val provisioner = WarpProvisioner(requireContext())
+                        val candidates = provisioner.createConnectionCandidates()
                         check(candidates.isNotEmpty()) { "No WARP connection candidates were produced" }
 
                         var name = "WARP"
@@ -301,20 +285,58 @@ class TunnelListFragment : BaseFragment() {
                         createdTunnel = tunnel
                         var completedHandshake = false
 
-                        candidates.forEachIndexed { index, candidate ->
+                        val verifiedRoutes = mutableListOf<VerifiedWarpRoute>()
+                        for ((index, candidate) in candidates.withIndex()) {
                             Log.i(TAG, "Testing WARP candidate ${index + 1}/${candidates.size}: ${candidate.endpoint.authority}")
                             if (index > 0) tunnel.setConfigAsync(candidate.config)
                             val attemptStartedAt = System.currentTimeMillis() / 1000L - 1L
+                            val attemptStartedElapsed = SystemClock.elapsedRealtime()
                             tunnel.setStateAsync(Tunnel.State.UP)
-                            val handshaked = awaitFreshHandshake(tunnel, attemptStartedAt)
+                            val handshakeWaitSeconds = if (index < LONG_HANDSHAKE_ATTEMPTS)
+                                HANDSHAKE_WAIT_SECONDS else FAST_HANDSHAKE_WAIT_SECONDS
+                            val handshaked = awaitFreshHandshake(
+                                tunnel,
+                                attemptStartedAt,
+                                handshakeWaitSeconds,
+                            )
+                            val handshakeMs = SystemClock.elapsedRealtime() - attemptStartedElapsed
                             completedHandshake = completedHandshake || handshaked
                             Log.i(TAG, "WARP handshake ${if (handshaked) "succeeded" else "timed out"}: ${candidate.endpoint.authority}")
                             if (handshaked) {
                                 delay(DATA_PATH_SETTLE_MS)
+                                val validationStartedElapsed = SystemClock.elapsedRealtime()
                                 val routed = verifyWarpDataPath()
+                                val validationMs = SystemClock.elapsedRealtime() - validationStartedElapsed
                                 Log.i(TAG, "WARP data path ${if (routed) "verified" else "failed"}: ${candidate.endpoint.authority}")
-                                if (routed) return@runCatching tunnel to candidate.endpoint
+                                if (routed) {
+                                    provisioner.recordEndpointSuccess(
+                                        candidate.endpoint,
+                                        handshakeMs,
+                                        validationMs,
+                                    )
+                                    verifiedRoutes += VerifiedWarpRoute(
+                                        candidate,
+                                        handshakeMs + validationMs,
+                                    )
+                                }
                             }
+                            if (verifiedRoutes.none { it.candidate.endpoint == candidate.endpoint })
+                                provisioner.recordEndpointFailure(candidate.endpoint)
+                            tunnel.setStateAsync(Tunnel.State.DOWN)
+                            if (verifiedRoutes.size >= VERIFIED_ROUTES_TO_COMPARE ||
+                                verifiedRoutes.isNotEmpty() && index + 1 >= MAX_DISCOVERY_ATTEMPTS)
+                                break
+                        }
+
+                        // Reconnect the fastest fully verified route. If it changed underneath us,
+                        // immediately fall through to the next verified route.
+                        for (route in verifiedRoutes.sortedBy(VerifiedWarpRoute::qualityMs)) {
+                            tunnel.setConfigAsync(route.candidate.config)
+                            val attemptStartedAt = System.currentTimeMillis() / 1000L - 1L
+                            tunnel.setStateAsync(Tunnel.State.UP)
+                            if (awaitFreshHandshake(tunnel, attemptStartedAt, HANDSHAKE_WAIT_SECONDS))
+                                return@runCatching tunnel to route.candidate.endpoint
+                            provisioner.recordEndpointFailure(route.candidate.endpoint)
                             tunnel.setStateAsync(Tunnel.State.DOWN)
                         }
                         if (completedHandshake)
@@ -347,8 +369,12 @@ class TunnelListFragment : BaseFragment() {
         }
     }
 
-    private suspend fun awaitFreshHandshake(tunnel: ObservableTunnel, attemptStartedAt: Long): Boolean {
-        repeat(HANDSHAKE_WAIT_SECONDS) {
+    private suspend fun awaitFreshHandshake(
+        tunnel: ObservableTunnel,
+        attemptStartedAt: Long,
+        waitSeconds: Int,
+    ): Boolean {
+        repeat(waitSeconds) {
             delay(1_000L)
             val handshake = withContext(Dispatchers.IO) {
                 runCatching { Application.getBackend().getLastHandshake(tunnel) }.getOrDefault(0L)
@@ -392,6 +418,11 @@ class TunnelListFragment : BaseFragment() {
     private fun viewForTunnel(tunnel: ObservableTunnel, tunnels: List<*>): MultiselectableRelativeLayout? {
         return binding?.tunnelList?.findViewHolderForAdapterPosition(tunnels.indexOf(tunnel))?.itemView as? MultiselectableRelativeLayout
     }
+
+    private data class VerifiedWarpRoute(
+        val candidate: WarpProfileCandidate,
+        val qualityMs: Long,
+    )
 
     private inner class ActionModeListener : ActionMode.Callback {
         val checkedItems: MutableCollection<Int> = HashSet()
@@ -526,6 +557,10 @@ class TunnelListFragment : BaseFragment() {
         private const val CHECKED_ITEMS = "CHECKED_ITEMS"
         private const val TAG = "AmneziaWG/TunnelListFragment"
         private const val HANDSHAKE_WAIT_SECONDS = 10
+        private const val FAST_HANDSHAKE_WAIT_SECONDS = 6
+        private const val LONG_HANDSHAKE_ATTEMPTS = 2
+        private const val VERIFIED_ROUTES_TO_COMPARE = 2
+        private const val MAX_DISCOVERY_ATTEMPTS = 4
         private const val WARP_TRACE_URL = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
         private const val DATA_PATH_TIMEOUT_MS = 6_000
         private const val DATA_PATH_SETTLE_MS = 500L

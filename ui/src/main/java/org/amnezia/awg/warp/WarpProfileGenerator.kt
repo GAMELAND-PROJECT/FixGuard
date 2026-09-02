@@ -11,15 +11,22 @@ object WarpProfileGenerator {
         val endpoint = endpointOverride ?: identity.endpoint.ifBlank { DEFAULT_ENDPOINT }
         val ipv4Address = identity.ipv4Address.substringBefore('/')
         val ipv6Address = identity.ipv6Address.substringBefore('/')
+        // Stable per-device/per-route diversity avoids changing the profile on every launch while
+        // preventing every generated client from sharing one obvious junk-packet fingerprint.
+        val diversitySeed = (identity.deviceId + endpoint).hashCode().toLong() and 0xffff_ffffL
+        val junkCount = 4 + (diversitySeed % 3L).toInt()
+        val junkMin = 10 + (diversitySeed % 11L).toInt()
+        val junkMax = junkMin + 25 + (diversitySeed % 16L).toInt()
         val text = """
             [Interface]
+            I1 = $STUN_INITIAL_PACKET
             PrivateKey = ${identity.privateKey}
             Address = $ipv4Address/32, $ipv6Address/128
             DNS = 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001
             MTU = 1280
-            Jc = 5
-            Jmin = 10
-            Jmax = 40
+            Jc = $junkCount
+            Jmin = $junkMin
+            Jmax = $junkMax
             S1 = 0
             S2 = 0
             H1 = 1
@@ -60,4 +67,5 @@ object WarpProfileGenerator {
     }
 
     private const val DEFAULT_ENDPOINT = "engage.cloudflareclient.com:2408"
+    private const val STUN_INITIAL_PACKET = "<b 0x000100142112a442><r 12><b 0x80220010><rc 16>"
 }

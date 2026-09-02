@@ -15,9 +15,15 @@ class WarpAwgRecovery(context: Context) {
 
         val currentEndpoint = config.peers
             .firstOrNull { it.publicKey.toBase64() == identity.peerPublicKey }
-            ?.endpoint?.orElse(null)?.toString()
-        val candidate = endpointScanner.connectionCandidates(identity.endpoint)
-            .firstOrNull { it.authority != currentEndpoint }
+            ?.endpoint?.orElse(null)
+        currentEndpoint?.let {
+            endpointScanner.recordFailure(WarpEndpoint(it.host, it.port, Long.MAX_VALUE))
+        }
+        val candidate = endpointScanner.connectionCandidates(
+            listOf(identity.endpoint, identity.endpointV4, identity.endpointV6)
+                .filter(String::isNotBlank),
+        )
+            .firstOrNull { it.authority != currentEndpoint?.toString() }
             ?: return null
         val endpointConfig = WarpProfileGenerator.replaceEndpoint(
             config,
@@ -32,6 +38,18 @@ class WarpAwgRecovery(context: Context) {
             else -> STUN_I1
         }
         return replaceI1(endpointConfig, next)
+    }
+
+    /** Promotes an endpoint only after the backend reports a real authenticated handshake. */
+    fun recordConnected(config: Config) {
+        val identity = runCatching { store.load() }.getOrNull() ?: return
+        val endpoint = config.peers
+            .firstOrNull { it.publicKey.toBase64() == identity.peerPublicKey }
+            ?.endpoint?.orElse(null) ?: return
+        endpointScanner.recordSuccess(
+            WarpEndpoint(endpoint.host, endpoint.port, 0L),
+            handshakeMs = 0L,
+        )
     }
 
     private fun replaceI1(config: Config, value: String?): Config {

@@ -24,6 +24,7 @@ import kotlin.random.Random
 class WarpEndpointScanner(context: Context) {
     private val appContext = context.applicationContext
     private val cache = WarpEndpointCache(appContext)
+    private val history = WarpEndpointHistory(appContext)
 
     suspend fun select(apiEndpoint: String, forceRefresh: Boolean = false): WarpEndpointSelection {
         val network = currentPhysicalNetwork()
@@ -31,7 +32,7 @@ class WarpEndpointScanner(context: Context) {
         val selectedPort = apiCandidate?.port?.takeIf(WARP_PORTS::contains) ?: DEFAULT_PORT
         // Include the algorithm version and port in the key so selections written by the old
         // random-port implementation can never be restored from cache.
-        val networkKey = "${currentNetworkKey(network)}:warp-port-v2:$selectedPort"
+        val networkKey = "${currentNetworkKey(network)}:warp-endpoint-v3:$selectedPort"
         if (!forceRefresh) cache.load(networkKey)?.let { return it }
 
         val candidates = buildCandidates(apiCandidate, selectedPort)
@@ -44,7 +45,11 @@ class WarpEndpointScanner(context: Context) {
             }
         }.orEmpty().sortedBy(WarpEndpoint::latencyMs)
 
-        val winners = measured.distinctBy { it.authority }.take(RESULT_COUNT)
+        // TCP/443 is only a weak reachability hint. Never discard a WARP candidate merely because
+        // it stayed silent here; only an authenticated UDP handshake can reject it.
+        val winners = (measured + candidates)
+            .distinctBy { it.authority }
+            .take(RESULT_COUNT)
         val selected = if (winners.isNotEmpty()) {
             WarpEndpointSelection(winners.first(), winners.drop(1))
         } else {
@@ -61,21 +66,46 @@ class WarpEndpointScanner(context: Context) {
      * Produces a small, deterministic set for a real tunnel-handshake test. TCP ranking chooses
      * the hosts; the caller must validate these official UDP ports with the AWG backend itself.
      */
-    suspend fun connectionCandidates(apiEndpoint: String): List<WarpEndpoint> {
-        val selection = select(apiEndpoint, forceRefresh = true)
-        val apiCandidate = parseEndpoint(apiEndpoint)
-        val endpoints = (listOfNotNull(apiCandidate) + selection.primary + selection.fallbacks)
+    suspend fun connectionCandidates(apiEndpoints: List<String>): List<WarpEndpoint> {
+        val parsedApiEndpoints = apiEndpoints.mapNotNull(::parseEndpoint).distinctBy(WarpEndpoint::authority)
+        val canonicalApi = parsedApiEndpoints.firstOrNull()?.authority ?: "$DEFAULT_HOST:$DEFAULT_PORT"
+        val selection = select(canonicalApi, forceRefresh = true)
+        val apiCandidate = parsedApiEndpoints.firstOrNull()
+        val networkKey = currentNetworkKey(currentPhysicalNetwork())
+        val proven = history.ranked(networkKey)
+        val endpoints = (proven + parsedApiEndpoints + selection.primary + selection.fallbacks)
             .distinctBy(WarpEndpoint::host)
         val preferredPort = apiCandidate?.port?.takeIf(WARP_PORTS::contains)
             ?: DEFAULT_PORT
         val orderedPorts = listOf(preferredPort) + WARP_PORTS.filterNot { it == preferredPort }
-        return buildList {
-            // First try the API-issued/default port across all routes. Only then spend time on
-            // fallback ports. This minimizes time-to-first-handshake on normal networks.
-            orderedPorts.forEach { port ->
-                endpoints.forEach { endpoint -> add(endpoint.copy(port = port)) }
-            }
-        }.distinctBy(WarpEndpoint::authority).take(MAX_HANDSHAKE_CANDIDATES)
+        val primaryRoutes = endpoints.take(PRIMARY_ROUTE_COUNT)
+            .map { endpoint -> endpoint.copy(port = preferredPort) }
+        val fallbackHosts = (parsedApiEndpoints + endpoints)
+            .distinctBy(WarpEndpoint::host)
+            .take(FALLBACK_HOST_COUNT)
+        val fallbackRoutes = orderedPorts.drop(1).flatMap { port ->
+            fallbackHosts.map { endpoint -> endpoint.copy(port = port) }
+        }
+        val generated = primaryRoutes + fallbackRoutes
+        return (proven + generated)
+            .distinctBy(WarpEndpoint::authority)
+            .take(MAX_HANDSHAKE_CANDIDATES)
+    }
+
+    suspend fun connectionCandidates(apiEndpoint: String): List<WarpEndpoint> =
+        connectionCandidates(listOf(apiEndpoint))
+
+    fun recordSuccess(endpoint: WarpEndpoint, handshakeMs: Long, validationMs: Long = 0L) {
+        history.recordSuccess(
+            currentNetworkKey(currentPhysicalNetwork()),
+            endpoint,
+            handshakeMs,
+            validationMs,
+        )
+    }
+
+    fun recordFailure(endpoint: WarpEndpoint) {
+        history.recordFailure(currentNetworkKey(currentPhysicalNetwork()), endpoint)
     }
 
     private fun buildCandidates(apiEndpoint: WarpEndpoint?, selectedPort: Int): List<WarpEndpoint> {
@@ -132,7 +162,9 @@ class WarpEndpointScanner(context: Context) {
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "ethernet"
             else -> "other"
         }
-        return "$transport:${network.networkHandle}"
+        // Network handles change after reconnects. Transport remains stable without requesting
+        // location/SSID access and lets successful routes survive application restarts.
+        return transport
     }
 
     private companion object {
@@ -144,14 +176,19 @@ class WarpEndpointScanner(context: Context) {
         const val MAX_CONCURRENCY = 8
         // 32 generated candidates fit in five 800 ms waves with concurrency 8.
         const val SAMPLES_PER_PREFIX = 4
-        const val RESULT_COUNT = 3
-        const val MAX_HANDSHAKE_CANDIDATES = 6
+        const val RESULT_COUNT = 8
+        const val MAX_HANDSHAKE_CANDIDATES = 12
+        const val PRIMARY_ROUTE_COUNT = 6
+        const val FALLBACK_HOST_COUNT = 2
 
         // Official Cloudflare WireGuard/WARP ports: UDP 2408 is the default and the remaining
         // values are documented fallbacks. Never persist an arbitrary port in a WARP profile.
         val WARP_PORTS = listOf(2408, 500, 1701, 4500)
         val WARP_IPV4_PREFIXES = listOf(
-            "162.159.192", "162.159.193", "162.159.195", "162.159.204",
+            // Official consumer/Cloudflare One WireGuard ingress seeds.
+            "162.159.192", "162.159.193",
+            // Community-observed consumer anycast pools. They never become trusted until an
+            // authenticated handshake and routed-data verification succeed on this device.
             "188.114.96", "188.114.97", "188.114.98", "188.114.99",
         )
     }

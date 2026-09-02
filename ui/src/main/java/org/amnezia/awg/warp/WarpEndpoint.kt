@@ -6,7 +6,7 @@ data class WarpEndpoint(
     val latencyMs: Long,
 ) {
     val authority: String
-        get() = "$host:$port"
+        get() = if (':' in host) "[$host]:$port" else "$host:$port"
 }
 
 data class WarpEndpointSelection(

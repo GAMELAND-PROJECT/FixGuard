@@ -174,6 +174,8 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
                             val activeTunnel = tunnelMap.firstOrNull { it.state == Tunnel.State.UP }
                             if (activeTunnel != null) {
                                 val newStatus = if (connected) {
+                                    runCatching { awgRecovery.recordConnected(activeTunnel.getConfigAsync()) }
+                                        .onFailure { error -> Log.w(TAG, "Could not save successful WARP endpoint", error) }
                                     ObservableTunnel.ConnectionStatus.CONNECTED
                                 } else {
                                     ObservableTunnel.ConnectionStatus.DISCONNECTED

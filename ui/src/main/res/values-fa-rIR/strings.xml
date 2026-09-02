@@ -95,9 +95,6 @@
     <string name="create_downloads_file_error">نمی‌توان در مسیر بارگیری پرونده‌ای ساخت</string>
     <string name="create_empty">ساختن از ابتدا</string>
     <string name="create_warp_profile">ساخت هوشمند پروفایل WARP</string>
-    <string name="warp_terms_title">ساخت پروفایل WARP</string>
-    <string name="warp_terms_message">یک کلید دستگاه روی همین گوشی تولید می‌شود و فقط کلید عمومی آن مستقیماً در Cloudflare ثبت خواهد شد. با ادامه، تأیید می‌کنید که قوانین استفاده Cloudflare را پذیرفته‌اید.</string>
-    <string name="warp_terms_accept">پذیرش و ساخت</string>
     <string name="warp_profile_creating">در حال ساخت امن پروفایل WARP…</string>
     <string name="warp_profile_created">پروفایل WARP «%s» ساخته شد</string>
     <string name="warp_profile_error">ساخت پروفایل WARP انجام نشد: %s</string>
@@ -105,9 +102,6 @@
     <string name="warp_endpoint_scanning">در حال پیدا کردن سریع‌ترین Endpoint وارپ…</string>
     <string name="warp_endpoint_updated">پروفایل «%1$s» به‌روزرسانی شد: %2$s (%3$d میلی‌ثانیه)</string>
     <string name="warp_endpoint_error">به‌روزرسانی Endpoint وارپ انجام نشد: %s</string>
-    <string name="warp_verified_title">ساخت و تست اتصال WARP</string>
-    <string name="warp_verified_message">برنامه یک پروفایل WARP می‌سازد، اتصال رمزگذاری‌شده واقعی را روی Endpointها و پورت‌های رسمی آزمایش می‌کند و فقط پروفایل متصل‌شده را نگه می‌دارد. پروفایل موفق روشن باقی می‌ماند.</string>
-    <string name="warp_verified_action">ساخت و اتصال</string>
     <string name="warp_verified_testing">در حال ساخت و آزمایش اتصال واقعی WARP…</string>
     <string name="warp_verified_connected">پروفایل «%1$s» با موفقیت از مسیر %2$s متصل شد</string>
     <string name="warp_verified_error">ساخت اتصال تست‌شده WARP موفق نبود: %s</string>

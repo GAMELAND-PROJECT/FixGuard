@@ -40,8 +40,12 @@ class WarpApiClient {
         val addresses = config.getJSONObject("interface").getJSONObject("addresses")
         val peer = config.getJSONArray("peers").getJSONObject(0)
         val endpointObject = peer.getJSONObject("endpoint")
-        val endpoint = endpointObject.optString("host").takeIf(::isValidEndpoint)
-            ?: endpointObject.optString("v4").takeIf(::isValidEndpoint)
+        val endpointHost = endpointObject.optString("host").takeIf(::isValidEndpoint).orEmpty()
+        val endpointV4 = endpointObject.optString("v4").takeIf(::isValidEndpoint).orEmpty()
+        val endpointV6 = endpointObject.optString("v6").takeIf(::isValidEndpoint).orEmpty()
+        val endpoint = endpointHost.ifBlank { endpointV4 }
+            .ifBlank { endpointV6 }
+            .takeIf(::isValidEndpoint)
             ?: DEFAULT_ENDPOINT
 
         return WarpIdentity(
@@ -56,6 +60,8 @@ class WarpApiClient {
             ipv6Address = addresses.getString("v6"),
             peerPublicKey = peer.getString("public_key"),
             endpoint = endpoint,
+            endpointV4 = endpointV4,
+            endpointV6 = endpointV6,
             enabled = response.optBoolean("enabled", true),
             warpEnabled = response.optBoolean("warp_enabled", true),
             updatedAt = response.optString("updated"),

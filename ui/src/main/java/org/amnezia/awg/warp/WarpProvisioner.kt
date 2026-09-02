@@ -31,7 +31,7 @@ class WarpProvisioner(context: Context) {
     suspend fun createConnectionCandidates(): List<WarpProfileCandidate> = withContext(Dispatchers.IO) {
         provisionMutex.withLock {
             val identity = loadCurrentIdentity()
-            endpointScanner.connectionCandidates(identity.endpoint).map { endpoint ->
+            endpointScanner.connectionCandidates(identity.apiEndpoints()).map { endpoint ->
                 WarpProfileCandidate(
                     config = WarpProfileGenerator.generate(identity, endpoint.authority),
                     endpoint = endpoint,
@@ -39,6 +39,17 @@ class WarpProvisioner(context: Context) {
             }
         }
     }
+
+    suspend fun recordEndpointSuccess(
+        endpoint: WarpEndpoint,
+        handshakeMs: Long,
+        validationMs: Long,
+    ) = withContext(Dispatchers.IO) {
+        endpointScanner.recordSuccess(endpoint, handshakeMs, validationMs)
+    }
+
+    suspend fun recordEndpointFailure(endpoint: WarpEndpoint) =
+        withContext(Dispatchers.IO) { endpointScanner.recordFailure(endpoint) }
 
     suspend fun optimizeProfile(config: Config): OptimizedWarpProfile = withContext(Dispatchers.IO) {
         provisionMutex.withLock {
@@ -90,6 +101,9 @@ class WarpProvisioner(context: Context) {
         registrationPreferences.edit().putLong(LAST_REGISTRATION_ATTEMPT, now).apply()
         return api.register(KeyPair()).also(store::save)
     }
+
+    private fun WarpIdentity.apiEndpoints(): List<String> =
+        listOf(endpoint, endpointV4, endpointV6).filter(String::isNotBlank).distinct()
 
     private companion object {
         val provisionMutex = Mutex()

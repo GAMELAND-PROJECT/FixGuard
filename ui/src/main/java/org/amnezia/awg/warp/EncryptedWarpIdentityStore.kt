@@ -87,6 +87,8 @@ class EncryptedWarpIdentityStore(private val context: Context) {
         .put("ipv6Address", value.ipv6Address)
         .put("peerPublicKey", value.peerPublicKey)
         .put("endpoint", value.endpoint)
+        .put("endpointV4", value.endpointV4)
+        .put("endpointV6", value.endpointV6)
         .put("enabled", value.enabled)
         .put("warpEnabled", value.warpEnabled)
         .put("updatedAt", value.updatedAt)
@@ -103,6 +105,8 @@ class EncryptedWarpIdentityStore(private val context: Context) {
         ipv6Address = value.getString("ipv6Address"),
         peerPublicKey = value.getString("peerPublicKey"),
         endpoint = value.getString("endpoint"),
+        endpointV4 = value.optString("endpointV4"),
+        endpointV6 = value.optString("endpointV6"),
         enabled = value.optBoolean("enabled", true),
         warpEnabled = value.optBoolean("warpEnabled", true),
         updatedAt = value.optString("updatedAt"),

@@ -95,9 +95,6 @@
     <string name="create_downloads_file_error">Cannot create file in downloads directory</string>
     <string name="create_empty">Create from scratch</string>
     <string name="create_warp_profile">Create smart WARP profile</string>
-    <string name="warp_terms_title">Create WARP profile</string>
-    <string name="warp_terms_message">A device key will be generated on this device and its public key will be registered directly with Cloudflare. By continuing, you confirm that you accept Cloudflare’s Terms of Service.</string>
-    <string name="warp_terms_accept">Accept and create</string>
     <string name="warp_profile_creating">Creating secure WARP profile…</string>
     <string name="warp_profile_created">WARP profile “%s” created</string>
     <string name="warp_profile_error">Could not create WARP profile: %s</string>
@@ -105,9 +102,6 @@
     <string name="warp_endpoint_scanning">Finding the fastest WARP endpoint…</string>
     <string name="warp_endpoint_updated">Profile “%1$s” updated: %2$s (%3$d ms)</string>
     <string name="warp_endpoint_error">Could not update WARP endpoint: %s</string>
-    <string name="warp_verified_title">Create and test WARP</string>
-    <string name="warp_verified_message">The app will create a WARP profile, test a real encrypted handshake on official endpoints and ports, and keep only a working profile. The successful profile will remain connected.</string>
-    <string name="warp_verified_action">Create and connect</string>
     <string name="warp_verified_testing">Creating and testing a real WARP connection…</string>
     <string name="warp_verified_connected">Profile “%1$s” connected successfully through %2$s</string>
     <string name="warp_verified_error">No tested WARP connection could be created: %s</string>
