@@ -11,13 +11,12 @@ class WarpAwgRecovery(context: Context) {
     private val policyResolver = WarpTunnelPolicyResolver(context.applicationContext)
 
     fun isManagedConfig(config: Config): Boolean {
-        val identity = runCatching { store.load() }.getOrNull() ?: return false
-        return config.peers.any { it.publicKey.toBase64() == identity.peerPublicKey }
+        return findIdentity(config) != null
     }
 
     /** Migrates old hostname-based WARP profiles to a tested numeric endpoint before activation. */
     suspend fun ensureNumericEndpoint(config: Config): Config? {
-        val identity = runCatching { store.load() }.getOrNull() ?: return null
+        val identity = findIdentity(config) ?: return null
         val endpoint = config.peers
             .firstOrNull { it.publicKey.toBase64() == identity.peerPublicKey }
             ?.endpoint?.orElse(null) ?: return null
@@ -32,8 +31,7 @@ class WarpAwgRecovery(context: Context) {
     }
 
     suspend fun nextConfig(config: Config): Config? {
-        val identity = runCatching { store.load() }.getOrNull() ?: return null
-        if (config.peers.none { it.publicKey.toBase64() == identity.peerPublicKey }) return null
+        val identity = findIdentity(config) ?: return null
 
         val currentEndpoint = config.peers
             .firstOrNull { it.publicKey.toBase64() == identity.peerPublicKey }
@@ -69,8 +67,7 @@ class WarpAwgRecovery(context: Context) {
 
     /** Selects the best-known route for a newly active physical network without penalizing the old one. */
     suspend fun bestConfig(config: Config): Config? {
-        val identity = runCatching { store.load() }.getOrNull() ?: return null
-        if (config.peers.none { it.publicKey.toBase64() == identity.peerPublicKey }) return null
+        val identity = findIdentity(config) ?: return null
         val candidate = endpointScanner.connectionCandidates(
             listOf(identity.endpoint, identity.endpointV4, identity.endpointV6)
                 .filter(String::isNotBlank),
@@ -93,7 +90,7 @@ class WarpAwgRecovery(context: Context) {
         handshakeMs: Long = 0L,
         validationMs: Long = 0L,
     ) {
-        val identity = runCatching { store.load() }.getOrNull() ?: return
+        val identity = findIdentity(config) ?: return
         val endpoint = config.peers
             .firstOrNull { it.publicKey.toBase64() == identity.peerPublicKey }
             ?.endpoint?.orElse(null) ?: return
@@ -116,6 +113,12 @@ class WarpAwgRecovery(context: Context) {
 
     private fun parse(value: String): Config =
         Config.parse(ByteArrayInputStream(value.toByteArray(Charsets.UTF_8)))
+
+    private fun findIdentity(config: Config): WarpIdentity? {
+        val peerKeys = config.peers.map { it.publicKey.toBase64() }.toSet()
+        return runCatching { store.loadAll() }.getOrDefault(emptyList())
+            .firstOrNull { it.peerPublicKey in peerKeys }
+    }
 
     private fun isNumericIp(host: String): Boolean = when {
         IPV4_SHAPE.matches(host) -> host.split('.').all { part ->

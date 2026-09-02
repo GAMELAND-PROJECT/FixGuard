@@ -31,15 +31,26 @@ class WarpProvisioner(context: Context) {
     /** Returns complete profiles whose endpoints still require a real AWG handshake test. */
     suspend fun createConnectionCandidates(): List<WarpProfileCandidate> = withContext(Dispatchers.IO) {
         provisionMutex.withLock {
-            val identity = loadCurrentIdentity()
-            val policy = policyResolver.current()
-            endpointScanner.connectionCandidates(identity.apiEndpoints()).map { endpoint ->
-                WarpProfileCandidate(
-                    config = WarpProfileGenerator.generate(identity, endpoint.authority, policy),
-                    endpoint = endpoint,
-                )
+            val identities = ensureIdentityPoolLocked(TARGET_IDENTITY_COUNT).ifEmpty {
+                listOf(loadCurrentIdentity())
             }
+            val policy = policyResolver.current()
+            identities.flatMap { identity ->
+                endpointScanner.connectionCandidates(identity.apiEndpoints())
+                    .take(CANDIDATES_PER_IDENTITY)
+                    .map { endpoint ->
+                        WarpProfileCandidate(
+                            config = WarpProfileGenerator.generate(identity, endpoint.authority, policy),
+                            endpoint = endpoint,
+                            deviceTag = identity.deviceId.takeLast(6),
+                        )
+                    }
+            }.take(MAX_TOTAL_CANDIDATES)
         }
+    }
+
+    suspend fun ensureIdentityPool(targetCount: Int = TARGET_IDENTITY_COUNT): Int = withContext(Dispatchers.IO) {
+        provisionMutex.withLock { ensureIdentityPoolLocked(targetCount).size }
     }
 
     suspend fun recordEndpointSuccess(
@@ -56,9 +67,11 @@ class WarpProvisioner(context: Context) {
     /** Returns operational account state without exposing IDs, tokens, keys, or addresses. */
     fun diagnostics(now: Long = System.currentTimeMillis()): WarpAccountDiagnostics {
         val identity = runCatching { store.load() }.getOrNull()
+        val identityCount = runCatching { store.loadAll().size }.getOrDefault(if (identity != null) 1 else 0)
         val retryAt = registrationPreferences.getLong(NEXT_REGISTRATION_ATTEMPT, 0L)
         return WarpAccountDiagnostics(
             registered = identity != null,
+            identityCount = identityCount,
             accountType = identity?.accountType?.ifBlank { "free" } ?: "-",
             deviceEnabled = identity?.enabled,
             warpEnabled = identity?.warpEnabled,
@@ -84,7 +97,7 @@ class WarpProvisioner(context: Context) {
     }
 
     private fun loadCurrentIdentity(requireExisting: Boolean = false): WarpIdentity {
-        val stored = store.load()
+        val stored = store.loadAll().firstOrNull()
         if (stored == null) {
             if (requireExisting) throw IllegalStateException("No stored WARP identity")
             return registerNewIdentity()
@@ -113,6 +126,17 @@ class WarpProvisioner(context: Context) {
         // consumer WireGuard tunnel. In particular, `enabled` can be false for a device whose
         // issued keys still authenticate. A fresh AWG handshake and WARP trace are authoritative.
         return current
+    }
+
+    private fun ensureIdentityPoolLocked(targetCount: Int): List<WarpIdentity> {
+        val existing = store.loadAll().toMutableList()
+        if (existing.size >= targetCount) return existing
+        while (existing.size < targetCount) {
+            val identity = registerNewIdentity()
+            if (existing.none { it.deviceId == identity.deviceId }) existing.add(identity)
+        }
+        store.saveAll(existing)
+        return existing
     }
 
     private fun registerNewIdentity(): WarpIdentity {
@@ -159,6 +183,9 @@ class WarpProvisioner(context: Context) {
         const val INITIAL_BACKOFF_MS = 30_000L
         const val MAX_BACKOFF_MS = 15 * 60_000L
         const val MAX_BACKOFF_EXPONENT = 6
+        const val TARGET_IDENTITY_COUNT = 5
+        const val CANDIDATES_PER_IDENTITY = 3
+        const val MAX_TOTAL_CANDIDATES = 15
     }
 }
 
@@ -170,10 +197,12 @@ data class OptimizedWarpProfile(
 data class WarpProfileCandidate(
     val config: Config,
     val endpoint: WarpEndpoint,
+    val deviceTag: String = "",
 )
 
 data class WarpAccountDiagnostics(
     val registered: Boolean,
+    val identityCount: Int,
     val accountType: String,
     val deviceEnabled: Boolean?,
     val warpEnabled: Boolean?,

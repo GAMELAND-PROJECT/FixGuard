@@ -12,17 +12,17 @@ class WarpTunnelPolicyResolver(context: Context) {
         .getSystemService(ConnectivityManager::class.java)
 
     fun current(): WarpTunnelPolicy {
-        val capabilities = connectivity.allNetworks.asSequence()
-            .mapNotNull(connectivity::getNetworkCapabilities)
-            .firstOrNull { !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) }
+        val capabilities = connectivity.activeNetwork
+            ?.let(connectivity::getNetworkCapabilities)
+            ?.takeIf { !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) }
         return when {
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true ->
-                WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 20)
+                WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 15)
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true ->
-                WarpTunnelPolicy(mtu = 1360, keepaliveSeconds = 30)
+                WarpTunnelPolicy(mtu = 1360, keepaliveSeconds = 25)
             capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true ->
-                WarpTunnelPolicy(mtu = 1320, keepaliveSeconds = 25)
-            else -> WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 25)
+                WarpTunnelPolicy(mtu = 1320, keepaliveSeconds = 20)
+            else -> WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 18)
         }
     }
 }
