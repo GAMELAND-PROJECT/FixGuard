@@ -106,6 +106,13 @@
     <string name="warp_verified_connected">پروفایل «%1$s» با موفقیت از مسیر %2$s متصل شد</string>
     <string name="warp_verified_error">ساخت اتصال تست‌شده WARP موفق نبود: %s</string>
     <string name="warp_profile_permission_required">برای آزمایش اتصال واقعی، مجوز VPN لازم است</string>
+    <string name="warp_stage_preparing">در حال آماده‌سازی هویت امن WARP…</string>
+    <string name="warp_stage_scanning">بررسی مسیر %1$d از %2$d: %3$s</string>
+    <string name="warp_stage_handshake">در حال احراز اتصال رمزگذاری‌شده از %s…</string>
+    <string name="warp_stage_verifying">هندشیک موفق بود؛ در حال بررسی اینترنت واقعی…</string>
+    <string name="warp_stage_selecting">در حال انتخاب سریع‌ترین مسیر تأییدشده…</string>
+    <string name="warp_stage_connected">اتصال امن از مسیر %1$s برقرار شد</string>
+    <string name="warp_stage_failed">اتصال ناموفق بود: %s</string>
     <string name="create_from_file">واردکردن از طریق پرونده یا آرشیو</string>
     <string name="create_from_qr_code">اسکن از کد QR</string>
     <string name="create_output_dir_error">نمی‌توان دایرکتوری خروجی را ایجاد کرد</string>
@@ -249,4 +256,11 @@
     <string name="biometric_prompt_private_key_title">برای دیدن کلید خصوصی، هویت خود را تایید کنید</string>
     <string name="biometric_auth_error">شکست در تایید هویت</string>
     <string name="biometric_auth_error_reason">شکست در تایید هویت: %s</string>
+    <string name="warp_diagnostics_title">عیب‌یابی امن</string>
+    <string name="warp_diagnostics_refresh">به‌روزرسانی</string>
+    <string name="warp_diagnostics_copy">کپی گزارش امن</string>
+    <string name="warp_diagnostics_copied">گزارش امن کپی شد</string>
+    <string name="warp_diagnostics_loading">در حال جمع‌آوری اطلاعات امن…</string>
+    <string name="warp_diagnostics_privacy">کلیدها، توکن‌ها، شناسه‌ها و آدرس‌های حساب عمداً از این گزارش حذف شده‌اند.</string>
+    <string name="warp_diagnostics_error">عیب‌یابی در دسترس نیست (%s)</string>
 </resources>

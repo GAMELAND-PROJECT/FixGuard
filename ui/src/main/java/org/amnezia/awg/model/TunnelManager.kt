@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 import androidx.databinding.BaseObservable
@@ -18,6 +19,7 @@ import org.amnezia.awg.Application.Companion.getTunnelManager
 import org.amnezia.awg.BR
 import org.amnezia.awg.R
 import org.amnezia.awg.backend.Statistics
+import org.amnezia.awg.backend.Backend
 import org.amnezia.awg.backend.StatusCallback
 import org.amnezia.awg.backend.Tunnel
 import org.amnezia.awg.configStore.ConfigStore
@@ -31,12 +33,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.amnezia.awg.warp.WarpAwgRecovery
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * Maintains and mediates changes to the set of available AmneziaWG tunnels,
@@ -131,24 +136,35 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
         if (automaticRecoveryPaused) return
         recoveryMutex.withLock {
             if (automaticRecoveryPaused || tunnel.state != Tunnel.State.UP) return@withLock
-            val backend = getBackend()
             val currentConfig = tunnel.getConfigAsync()
             val recoveryConfig = withContext(Dispatchers.IO) {
                 awgRecovery.nextConfig(currentConfig) ?: currentConfig
             }
             tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTING)
-            withContext(Dispatchers.IO) {
+            val activation = withContext(Dispatchers.IO) {
+                val backend = getBackend()
                 backend.setState(tunnel, Tunnel.State.DOWN, null)
-                kotlinx.coroutines.delay(750)
+                delay(750L)
                 try {
-                    backend.setState(tunnel, Tunnel.State.UP, recoveryConfig)
+                    if (awgRecovery.isManagedConfig(recoveryConfig)) {
+                        activateManagedWarp(tunnel, recoveryConfig)
+                    } else {
+                        WarpActivation(
+                            backend.setState(tunnel, Tunnel.State.UP, recoveryConfig),
+                            recoveryConfig,
+                        )
+                    }
                 } catch (error: Throwable) {
                     runCatching { backend.setState(tunnel, Tunnel.State.UP, currentConfig) }
                     throw error
                 }
-                if (recoveryConfig != currentConfig) configStore.save(tunnel.name, recoveryConfig)
             }
-            if (recoveryConfig != currentConfig) tunnel.onConfigChanged(recoveryConfig)
+            if (activation.config != currentConfig) {
+                withContext(Dispatchers.IO) { configStore.save(tunnel.name, activation.config) }
+                tunnel.onConfigChanged(activation.config)
+            }
+            if (activation.state == Tunnel.State.UP)
+                tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTED)
         }
     }
 
@@ -163,6 +179,38 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
             }
         }
 
+    /** Rebinds active tunnels after a debounced physical-network change. */
+    suspend fun reconnectAfterNetworkChange() = recoveryMutex.withLock {
+        val active = tunnelMap.filter { it.state == Tunnel.State.UP }
+        if (active.isEmpty()) return@withLock
+        for (tunnel in active) {
+            val currentConfig = tunnel.getConfigAsync()
+            val selectedConfig = withContext(Dispatchers.IO) {
+                awgRecovery.bestConfig(currentConfig) ?: currentConfig
+            }
+            tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTING)
+            val activation = withContext(Dispatchers.IO) {
+                val backend = getBackend()
+                backend.setState(tunnel, Tunnel.State.DOWN, null)
+                delay(750L)
+                if (awgRecovery.isManagedConfig(selectedConfig)) {
+                    activateManagedWarp(tunnel, selectedConfig)
+                } else {
+                    WarpActivation(
+                        backend.setState(tunnel, Tunnel.State.UP, selectedConfig),
+                        selectedConfig,
+                    )
+                }
+            }
+            if (activation.config != currentConfig) {
+                withContext(Dispatchers.IO) { configStore.save(tunnel.name, activation.config) }
+                tunnel.onConfigChanged(activation.config)
+            }
+            if (activation.state == Tunnel.State.UP)
+                tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTED)
+        }
+    }
+
     private fun setupStatusCallbacks() {
         applicationScope.launch {
             try {
@@ -174,8 +222,10 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
                             val activeTunnel = tunnelMap.firstOrNull { it.state == Tunnel.State.UP }
                             if (activeTunnel != null) {
                                 val newStatus = if (connected) {
-                                    runCatching { awgRecovery.recordConnected(activeTunnel.getConfigAsync()) }
-                                        .onFailure { error -> Log.w(TAG, "Could not save successful WARP endpoint", error) }
+                                    if (activeTunnel.connectionStatus != ObservableTunnel.ConnectionStatus.CONNECTED) {
+                                        runCatching { awgRecovery.recordConnected(activeTunnel.getConfigAsync()) }
+                                            .onFailure { error -> Log.w(TAG, "Could not save successful WARP endpoint", error) }
+                                    }
                                     ObservableTunnel.ConnectionStatus.CONNECTED
                                 } else {
                                     ObservableTunnel.ConnectionStatus.DISCONNECTED
@@ -209,12 +259,19 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
     private fun refreshTunnelStates() {
         applicationScope.launch {
             try {
-                val running = withContext(Dispatchers.IO) { getBackend().runningTunnelNames }
-                for (tunnel in tunnelMap)
-                    tunnel.onStateChanged(if (running.contains(tunnel.name)) Tunnel.State.UP else Tunnel.State.DOWN)
+                synchronizeTunnelStatesWithBackend()
             } catch (e: Throwable) {
                 Log.e(TAG, Log.getStackTraceString(e))
             }
+        }
+    }
+
+    /** GoBackend can implicitly replace its previous tunnel; mirror that native truth in the UI. */
+    private suspend fun synchronizeTunnelStatesWithBackend() = withContext(Dispatchers.Main.immediate) {
+        val running = withContext(Dispatchers.IO) { getBackend().runningTunnelNames }
+        for (item in tunnelMap) {
+            val actualState = if (item.name in running) Tunnel.State.UP else Tunnel.State.DOWN
+            if (item.state != actualState) item.onStateChanged(actualState)
         }
     }
 
@@ -279,17 +336,136 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
         newName!!
     }
 
+    /**
+     * A backend UP result only means that the local interface exists. For a managed WARP profile,
+     * do not report success until both a fresh authenticated handshake and routed WARP traffic are
+     * observed. A flaky first UDP/NAT mapping is retried automatically before rotating endpoint.
+     */
+    private suspend fun activateManagedWarp(
+        tunnel: ObservableTunnel,
+        initialConfig: Config,
+    ): WarpActivation = withContext(Dispatchers.IO) {
+        val backend = getBackend()
+        var candidateConfig = awgRecovery.ensureNumericEndpoint(initialConfig)
+            ?: throw IllegalStateException("No numeric WARP endpoint is available")
+        var lastFailure: Throwable? = null
+
+        repeat(WARP_CONNECT_ATTEMPTS) { attempt ->
+            val attemptStartedAt = System.currentTimeMillis() / 1_000L - 1L
+            val attemptStartedElapsed = SystemClock.elapsedRealtime()
+            val state = runCatching { backend.setState(tunnel, Tunnel.State.UP, candidateConfig) }
+                .onFailure { error -> lastFailure = error }
+                .getOrNull()
+
+            if (state == Tunnel.State.UP) {
+                val handshaked = awaitFreshHandshake(backend, tunnel, attemptStartedAt)
+                val handshakeMs = SystemClock.elapsedRealtime() - attemptStartedElapsed
+                if (handshaked) {
+                    delay(WARP_DATA_PATH_SETTLE_MS)
+                    val validationStarted = SystemClock.elapsedRealtime()
+                    if (verifyWarpDataPath()) {
+                        val validationMs = SystemClock.elapsedRealtime() - validationStarted
+                        awgRecovery.recordConnected(candidateConfig, handshakeMs, validationMs)
+                        return@withContext WarpActivation(Tunnel.State.UP, candidateConfig)
+                    }
+                    lastFailure = IllegalStateException("WARP handshake completed but Internet routing was not ready")
+                } else {
+                    lastFailure = IllegalStateException("WARP handshake timed out")
+                }
+            }
+
+            runCatching { backend.setState(tunnel, Tunnel.State.DOWN, null) }
+            if (attempt + 1 >= WARP_CONNECT_ATTEMPTS) return@repeat
+
+            // The first retry deliberately keeps the verified endpoint. This repairs the common
+            // first UDP/NAT mapping failure quickly; only subsequent attempts pay for a scan and
+            // rotate to a different, supported WARP route.
+            if (attempt + 1 >= SAME_ENDPOINT_ATTEMPTS) {
+                candidateConfig = runCatching { awgRecovery.nextConfig(candidateConfig) }
+                    .getOrNull() ?: candidateConfig
+            }
+            delay(WARP_RETRY_BASE_DELAY_MS * (attempt + 1L))
+        }
+
+        runCatching { backend.setState(tunnel, Tunnel.State.DOWN, null) }
+        throw lastFailure ?: IllegalStateException("WARP connection could not be verified")
+    }
+
+    private suspend fun awaitFreshHandshake(
+        backend: Backend,
+        tunnel: ObservableTunnel,
+        attemptStartedAt: Long,
+    ): Boolean {
+        repeat((WARP_HANDSHAKE_TIMEOUT_MS / WARP_HANDSHAKE_POLL_MS).toInt()) {
+            delay(WARP_HANDSHAKE_POLL_MS)
+            val handshake = runCatching { backend.getLastHandshake(tunnel) }.getOrDefault(0L)
+            if (handshake >= attemptStartedAt) return true
+        }
+        return false
+    }
+
+    private suspend fun verifyWarpDataPath(): Boolean {
+        repeat(WARP_DATA_PATH_ATTEMPTS) { attempt ->
+            val verified = runCatching {
+                val connection = URL(WARP_TRACE_URL).openConnection() as HttpURLConnection
+                try {
+                    connection.connectTimeout = WARP_DATA_PATH_TIMEOUT_MS
+                    connection.readTimeout = WARP_DATA_PATH_TIMEOUT_MS
+                    connection.instanceFollowRedirects = false
+                    connection.useCaches = false
+                    connection.setRequestProperty("Connection", "close")
+                    connection.responseCode in 200..299 && connection.inputStream
+                        .bufferedReader()
+                        .useLines { lines ->
+                            lines.any { line ->
+                                line.equals("warp=on", ignoreCase = true) ||
+                                    line.equals("warp=plus", ignoreCase = true)
+                            }
+                        }
+                } finally {
+                    connection.disconnect()
+                }
+            }.getOrDefault(false)
+            if (verified) return true
+            if (attempt + 1 < WARP_DATA_PATH_ATTEMPTS) delay(WARP_DATA_PATH_RETRY_DELAY_MS)
+        }
+        return false
+    }
+
     suspend fun setTunnelState(tunnel: ObservableTunnel, state: Tunnel.State): Tunnel.State = withContext(Dispatchers.Main.immediate) {
         var newState = tunnel.state
         var throwable: Throwable? = null
         try {
-            newState = withContext(Dispatchers.IO) { getBackend().setState(tunnel, state, tunnel.getConfigAsync()) }
-            if (newState == Tunnel.State.UP)
+            val initialConfig = tunnel.getConfigAsync()
+            val managedWarp = state == Tunnel.State.UP && !automaticRecoveryPaused &&
+                withContext(Dispatchers.IO) { awgRecovery.isManagedConfig(initialConfig) }
+            if (managedWarp) {
+                tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTING)
+                val activation = recoveryMutex.withLock {
+                    activateManagedWarp(tunnel, initialConfig)
+                }
+                newState = activation.state
+                if (activation.config != initialConfig) {
+                    withContext(Dispatchers.IO) { configStore.save(tunnel.name, activation.config) }
+                    tunnel.onConfigChanged(activation.config)
+                }
+                tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTED)
+            } else {
+                newState = withContext(Dispatchers.IO) {
+                    getBackend().setState(tunnel, state, initialConfig)
+                }
+            }
+            if (newState == Tunnel.State.UP) {
                 lastUsedTunnel = tunnel
+            }
         } catch (e: Throwable) {
             throwable = e
+            newState = Tunnel.State.DOWN
+            tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.DISCONNECTED)
         }
         tunnel.onStateChanged(newState)
+        runCatching { synchronizeTunnelStatesWithBackend() }
+            .onFailure { error -> Log.w(TAG, "Could not synchronize tunnel states", error) }
         saveState()
         if (throwable != null)
             throw throwable
@@ -336,5 +512,17 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
 
     companion object {
         private const val TAG = "AmneziaWG/TunnelManager"
+        private const val WARP_CONNECT_ATTEMPTS = 3
+        private const val SAME_ENDPOINT_ATTEMPTS = 2
+        private const val WARP_HANDSHAKE_TIMEOUT_MS = 7_000L
+        private const val WARP_HANDSHAKE_POLL_MS = 250L
+        private const val WARP_DATA_PATH_SETTLE_MS = 500L
+        private const val WARP_DATA_PATH_ATTEMPTS = 2
+        private const val WARP_DATA_PATH_TIMEOUT_MS = 4_000
+        private const val WARP_DATA_PATH_RETRY_DELAY_MS = 500L
+        private const val WARP_RETRY_BASE_DELAY_MS = 500L
+        private const val WARP_TRACE_URL = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
     }
+
+    private data class WarpActivation(val state: Tunnel.State, val config: Config)
 }

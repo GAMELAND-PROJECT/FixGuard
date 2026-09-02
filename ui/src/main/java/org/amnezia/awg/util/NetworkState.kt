@@ -15,6 +15,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET
 import android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED
 import android.net.NetworkCapabilities.TRANSPORT_CELLULAR
+import android.net.NetworkCapabilities.TRANSPORT_ETHERNET
 import android.net.NetworkCapabilities.TRANSPORT_WIFI
 import android.net.NetworkRequest
 import android.os.Build
@@ -54,6 +55,7 @@ class NetworkState(
             .addCapability(NET_CAPABILITY_INTERNET)
             .addTransportType(TRANSPORT_WIFI)
             .addTransportType(TRANSPORT_CELLULAR)
+            .addTransportType(TRANSPORT_ETHERNET)
             .build()
     }
 
@@ -111,6 +113,7 @@ class NetworkState(
                 return when {
                     capabilities.hasTransport(TRANSPORT_WIFI) -> NetworkType.WIFI
                     capabilities.hasTransport(TRANSPORT_CELLULAR) -> NetworkType.CELLULAR
+                    capabilities.hasTransport(TRANSPORT_ETHERNET) -> NetworkType.OTHER
                     else -> NetworkType.OTHER
                 }
             }

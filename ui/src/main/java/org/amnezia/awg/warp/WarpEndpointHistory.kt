@@ -14,12 +14,12 @@ class WarpEndpointHistory(context: Context) {
             .filter { it.quarantineUntil <= now }
             .sortedWith(
                 compareByDescending<EndpointEvidence> { it.successes > 0 }
-                    .thenBy { it.qualityLatencyMs() }
+                    .thenBy { it.qualityScoreMs() }
                     .thenByDescending { it.successes }
                     .thenByDescending { it.lastSuccessAt }
-                    .thenBy { it.failures },
+                    .thenBy { it.consecutiveFailures },
             )
-            .map { WarpEndpoint(it.host, it.port, it.qualityLatencyMs()) }
+            .map { WarpEndpoint(it.host, it.port, it.qualityScoreMs()) }
 
     @Synchronized
     fun recordSuccess(
@@ -40,11 +40,20 @@ class WarpEndpointHistory(context: Context) {
                 previous.averageValidationMs <= 0 -> validationMs
                 else -> ((previous.averageValidationMs * 3L) + validationMs) / 4L
             }
+            val jitterSample = if (previous.averageHandshakeMs > 0 && handshakeMs > 0)
+                kotlin.math.abs(handshakeMs - previous.averageHandshakeMs) else 0L
+            val jitterAverage = when {
+                jitterSample <= 0 -> previous.averageJitterMs
+                previous.averageJitterMs <= 0 -> jitterSample
+                else -> ((previous.averageJitterMs * 3L) + jitterSample) / 4L
+            }
             previous.copy(
+                attempts = previous.attempts + 1,
                 successes = previous.successes + 1,
-                failures = 0,
+                consecutiveFailures = 0,
                 averageHandshakeMs = average,
                 averageValidationMs = validationAverage,
+                averageJitterMs = jitterAverage,
                 lastSuccessAt = now,
                 quarantineUntil = 0L,
             )
@@ -55,11 +64,13 @@ class WarpEndpointHistory(context: Context) {
     fun recordFailure(networkKey: String, endpoint: WarpEndpoint) {
         val now = System.currentTimeMillis()
         update(networkKey, endpoint) { previous ->
-            val failures = previous.failures + 1
+            val consecutiveFailures = previous.consecutiveFailures + 1
             previous.copy(
-                failures = failures,
+                attempts = previous.attempts + 1,
+                failures = previous.failures + 1,
+                consecutiveFailures = consecutiveFailures,
                 lastFailureAt = now,
-                quarantineUntil = if (failures >= FAILURES_BEFORE_QUARANTINE)
+                quarantineUntil = if (consecutiveFailures >= FAILURES_BEFORE_QUARANTINE)
                     now + QUARANTINE_MS else 0L,
             )
         }
@@ -89,10 +100,13 @@ class WarpEndpointHistory(context: Context) {
                     EndpointEvidence(
                         host = item.getString("host"),
                         port = item.getInt("port"),
+                        attempts = item.optInt("attempts", item.optInt("successes") + item.optInt("failures")),
                         successes = item.optInt("successes"),
                         failures = item.optInt("failures"),
+                        consecutiveFailures = item.optInt("consecutiveFailures", item.optInt("failures")),
                         averageHandshakeMs = item.optLong("averageHandshakeMs"),
                         averageValidationMs = item.optLong("averageValidationMs"),
+                        averageJitterMs = item.optLong("averageJitterMs"),
                         lastSuccessAt = item.optLong("lastSuccessAt"),
                         lastFailureAt = item.optLong("lastFailureAt"),
                         quarantineUntil = item.optLong("quarantineUntil"),
@@ -108,10 +122,13 @@ class WarpEndpointHistory(context: Context) {
             array.put(JSONObject().apply {
                 put("host", entry.host)
                 put("port", entry.port)
+                put("attempts", entry.attempts)
                 put("successes", entry.successes)
                 put("failures", entry.failures)
+                put("consecutiveFailures", entry.consecutiveFailures)
                 put("averageHandshakeMs", entry.averageHandshakeMs)
                 put("averageValidationMs", entry.averageValidationMs)
+                put("averageJitterMs", entry.averageJitterMs)
                 put("lastSuccessAt", entry.lastSuccessAt)
                 put("lastFailureAt", entry.lastFailureAt)
                 put("quarantineUntil", entry.quarantineUntil)
@@ -123,17 +140,23 @@ class WarpEndpointHistory(context: Context) {
     private data class EndpointEvidence(
         val host: String,
         val port: Int,
+        val attempts: Int = 0,
         val successes: Int = 0,
         val failures: Int = 0,
+        val consecutiveFailures: Int = 0,
         val averageHandshakeMs: Long = 0L,
         val averageValidationMs: Long = 0L,
+        val averageJitterMs: Long = 0L,
         val lastSuccessAt: Long = 0L,
         val lastFailureAt: Long = 0L,
         val quarantineUntil: Long = 0L,
     ) {
-        fun qualityLatencyMs(): Long {
+        fun qualityScoreMs(): Long {
             if (averageHandshakeMs <= 0) return Long.MAX_VALUE
-            return averageHandshakeMs + averageValidationMs.coerceAtLeast(0L)
+            val observedAttempts = attempts.coerceAtLeast(successes + failures).coerceAtLeast(1)
+            val lossPenalty = failures.toLong() * LOSS_PENALTY_MS / observedAttempts
+            return averageHandshakeMs + averageValidationMs.coerceAtLeast(0L) +
+                (averageJitterMs * JITTER_WEIGHT) + lossPenalty
         }
     }
 
@@ -142,5 +165,7 @@ class WarpEndpointHistory(context: Context) {
         const val MAX_SAVED_ENDPOINTS = 40
         const val FAILURES_BEFORE_QUARANTINE = 2
         const val QUARANTINE_MS = 15 * 60_000L
+        const val LOSS_PENALTY_MS = 2_000L
+        const val JITTER_WEIGHT = 2L
     }
 }

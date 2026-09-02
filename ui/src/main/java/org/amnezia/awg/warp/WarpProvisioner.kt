@@ -18,12 +18,13 @@ class WarpProvisioner(context: Context) {
     )
     private val api = WarpApiClient()
     private val endpointScanner = WarpEndpointScanner(context.applicationContext)
+    private val policyResolver = WarpTunnelPolicyResolver(appContext)
 
     suspend fun createProfile(): Config = withContext(Dispatchers.IO) {
         provisionMutex.withLock {
             val identity = loadCurrentIdentity()
             val selection = endpointScanner.select(identity.endpoint)
-            WarpProfileGenerator.generate(identity, selection.primary.authority)
+            WarpProfileGenerator.generate(identity, selection.primary.authority, policyResolver.current())
         }
     }
 
@@ -31,9 +32,10 @@ class WarpProvisioner(context: Context) {
     suspend fun createConnectionCandidates(): List<WarpProfileCandidate> = withContext(Dispatchers.IO) {
         provisionMutex.withLock {
             val identity = loadCurrentIdentity()
+            val policy = policyResolver.current()
             endpointScanner.connectionCandidates(identity.apiEndpoints()).map { endpoint ->
                 WarpProfileCandidate(
-                    config = WarpProfileGenerator.generate(identity, endpoint.authority),
+                    config = WarpProfileGenerator.generate(identity, endpoint.authority, policy),
                     endpoint = endpoint,
                 )
             }
@@ -50,6 +52,21 @@ class WarpProvisioner(context: Context) {
 
     suspend fun recordEndpointFailure(endpoint: WarpEndpoint) =
         withContext(Dispatchers.IO) { endpointScanner.recordFailure(endpoint) }
+
+    /** Returns operational account state without exposing IDs, tokens, keys, or addresses. */
+    fun diagnostics(now: Long = System.currentTimeMillis()): WarpAccountDiagnostics {
+        val identity = runCatching { store.load() }.getOrNull()
+        val retryAt = registrationPreferences.getLong(NEXT_REGISTRATION_ATTEMPT, 0L)
+        return WarpAccountDiagnostics(
+            registered = identity != null,
+            accountType = identity?.accountType?.ifBlank { "free" } ?: "-",
+            deviceEnabled = identity?.enabled,
+            warpEnabled = identity?.warpEnabled,
+            updatedAt = identity?.updatedAt?.ifBlank { identity.createdAt }?.ifBlank { "-" } ?: "-",
+            registrationFailures = registrationPreferences.getInt(REGISTRATION_FAILURES, 0),
+            retryAfterSeconds = ((retryAt - now + 999L) / 1_000L).coerceAtLeast(0L),
+        )
+    }
 
     suspend fun optimizeProfile(config: Config): OptimizedWarpProfile = withContext(Dispatchers.IO) {
         provisionMutex.withLock {
@@ -73,8 +90,15 @@ class WarpProvisioner(context: Context) {
             return registerNewIdentity()
         }
 
+        val now = System.currentTimeMillis()
+        val lastRefreshAt = registrationPreferences.getLong(LAST_IDENTITY_REFRESH_AT, 0L)
+        if (now - lastRefreshAt < IDENTITY_REFRESH_INTERVAL_MS) return stored
+
         val current = try {
-            api.refresh(stored).also(store::save)
+            api.refresh(stored).also { identity ->
+                store.save(identity)
+                registrationPreferences.edit().putLong(LAST_IDENTITY_REFRESH_AT, now).apply()
+            }
         } catch (error: WarpApiException) {
             if (error.statusCode != 401 && error.statusCode != 404) return stored
             // The token/device is definitively invalid. Replace it once instead of looping on
@@ -93,13 +117,33 @@ class WarpProvisioner(context: Context) {
 
     private fun registerNewIdentity(): WarpIdentity {
         val now = System.currentTimeMillis()
-        val lastAttempt = registrationPreferences.getLong(LAST_REGISTRATION_ATTEMPT, 0L)
-        check(now - lastAttempt >= REGISTRATION_COOLDOWN_MS) {
-            "WARP registration is cooling down; try again shortly"
+        val nextAttempt = registrationPreferences.getLong(NEXT_REGISTRATION_ATTEMPT, 0L)
+        check(now >= nextAttempt) {
+            val seconds = ((nextAttempt - now + 999L) / 1_000L).coerceAtLeast(1L)
+            "WARP registration is rate-limited; retry in $seconds seconds"
         }
-        // Persist before the request so failures and repeated taps cannot hammer the API.
-        registrationPreferences.edit().putLong(LAST_REGISTRATION_ATTEMPT, now).apply()
-        return api.register(KeyPair()).also(store::save)
+        return try {
+            api.register(KeyPair()).also { identity ->
+                store.save(identity)
+                registrationPreferences.edit()
+                    .putInt(REGISTRATION_FAILURES, 0)
+                    .putLong(NEXT_REGISTRATION_ATTEMPT, 0L)
+                    .putLong(LAST_IDENTITY_REFRESH_AT, now)
+                    .apply()
+            }
+        } catch (error: Throwable) {
+            val failures = (registrationPreferences.getInt(REGISTRATION_FAILURES, 0) + 1)
+                .coerceAtMost(MAX_BACKOFF_EXPONENT)
+            val exponentialDelay = INITIAL_BACKOFF_MS * (1L shl (failures - 1))
+            val delay = (error as? WarpApiException)?.retryAfterMs
+                ?.coerceAtLeast(exponentialDelay)
+                ?: exponentialDelay
+            registrationPreferences.edit()
+                .putInt(REGISTRATION_FAILURES, failures)
+                .putLong(NEXT_REGISTRATION_ATTEMPT, now + delay.coerceAtMost(MAX_BACKOFF_MS))
+                .apply()
+            throw error
+        }
     }
 
     private fun WarpIdentity.apiEndpoints(): List<String> =
@@ -108,8 +152,13 @@ class WarpProvisioner(context: Context) {
     private companion object {
         val provisionMutex = Mutex()
         const val REGISTRATION_PREFERENCES = "warp_registration_guard"
-        const val LAST_REGISTRATION_ATTEMPT = "last_attempt"
-        const val REGISTRATION_COOLDOWN_MS = 30_000L
+        const val NEXT_REGISTRATION_ATTEMPT = "next_attempt"
+        const val REGISTRATION_FAILURES = "failures"
+        const val LAST_IDENTITY_REFRESH_AT = "last_identity_refresh_at"
+        const val IDENTITY_REFRESH_INTERVAL_MS = 15 * 60_000L
+        const val INITIAL_BACKOFF_MS = 30_000L
+        const val MAX_BACKOFF_MS = 15 * 60_000L
+        const val MAX_BACKOFF_EXPONENT = 6
     }
 }
 
@@ -121,4 +170,14 @@ data class OptimizedWarpProfile(
 data class WarpProfileCandidate(
     val config: Config,
     val endpoint: WarpEndpoint,
+)
+
+data class WarpAccountDiagnostics(
+    val registered: Boolean,
+    val accountType: String,
+    val deviceEnabled: Boolean?,
+    val warpEnabled: Boolean?,
+    val updatedAt: String,
+    val registrationFailures: Int,
+    val retryAfterSeconds: Long,
 )

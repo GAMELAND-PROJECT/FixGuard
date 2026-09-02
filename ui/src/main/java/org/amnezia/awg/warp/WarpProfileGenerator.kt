@@ -7,8 +7,14 @@ import java.io.ByteArrayInputStream
 
 /** Produces a conservative WARP-compatible AmneziaWG profile. */
 object WarpProfileGenerator {
-    fun generate(identity: WarpIdentity, endpointOverride: String? = null): Config {
-        val endpoint = endpointOverride ?: identity.endpoint.ifBlank { DEFAULT_ENDPOINT }
+    fun generate(
+        identity: WarpIdentity,
+        endpointOverride: String? = null,
+        policy: WarpTunnelPolicy = WarpTunnelPolicy(1280, 25),
+    ): Config {
+        // Endpoint discovery always supplies a numeric address. Keep the defensive fallback
+        // numeric too, so this generator can never silently reintroduce DNS into a tunnel.
+        val endpoint = endpointOverride ?: DEFAULT_ENDPOINT
         val ipv4Address = identity.ipv4Address.substringBefore('/')
         val ipv6Address = identity.ipv6Address.substringBefore('/')
         // Stable per-device/per-route diversity avoids changing the profile on every launch while
@@ -23,7 +29,7 @@ object WarpProfileGenerator {
             PrivateKey = ${identity.privateKey}
             Address = $ipv4Address/32, $ipv6Address/128
             DNS = 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001
-            MTU = 1280
+            MTU = ${policy.mtu}
             Jc = $junkCount
             Jmin = $junkMin
             Jmax = $junkMax
@@ -38,7 +44,7 @@ object WarpProfileGenerator {
             PublicKey = ${identity.peerPublicKey}
             AllowedIPs = 0.0.0.0/0, ::/0
             Endpoint = $endpoint
-            PersistentKeepalive = 25
+            PersistentKeepalive = ${policy.keepaliveSeconds}
         """.trimIndent()
         return Config.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
     }
@@ -66,6 +72,31 @@ object WarpProfileGenerator {
             .build()
     }
 
-    private const val DEFAULT_ENDPOINT = "engage.cloudflareclient.com:2408"
+    /** Applies transport-aware settings only to a verified WARP profile. */
+    fun applyPolicy(config: Config, peerPublicKey: String, policy: WarpTunnelPolicy): Config? {
+        if (config.peers.none { it.publicKey.toBase64() == peerPublicKey }) return null
+        var text = config.toAwgQuickString()
+        text = if (MTU_LINE.containsMatchIn(text)) {
+            text.replaceFirst(MTU_LINE, "MTU = ${policy.mtu}")
+        } else {
+            val privateKeyLine = PRIVATE_KEY_LINE.find(text)
+                ?: return null
+            text.replaceRange(
+                privateKeyLine.range,
+                "MTU = ${policy.mtu}\n${privateKeyLine.value}",
+            )
+        }
+        text = if (KEEPALIVE_LINE.containsMatchIn(text)) {
+            text.replaceFirst(KEEPALIVE_LINE, "PersistentKeepalive = ${policy.keepaliveSeconds}")
+        } else {
+            text.trimEnd() + "\nPersistentKeepalive = ${policy.keepaliveSeconds}\n"
+        }
+        return Config.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
+    }
+
+    private const val DEFAULT_ENDPOINT = "162.159.192.1:2408"
     private const val STUN_INITIAL_PACKET = "<b 0x000100142112a442><r 12><b 0x80220010><rc 16>"
+    private val MTU_LINE = Regex("(?mi)^\\s*MTU\\s*=.*$")
+    private val PRIVATE_KEY_LINE = Regex("(?mi)^\\s*PrivateKey\\s*=.*$")
+    private val KEEPALIVE_LINE = Regex("(?mi)^\\s*PersistentKeepalive\\s*=.*$")
 }

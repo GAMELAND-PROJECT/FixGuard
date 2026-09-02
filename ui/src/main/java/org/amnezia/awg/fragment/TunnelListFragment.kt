@@ -44,6 +44,7 @@ import org.amnezia.awg.widget.MultiselectableRelativeLayout
 import org.amnezia.awg.warp.WarpProvisioner
 import org.amnezia.awg.warp.WarpProfileCandidate
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
@@ -61,6 +62,7 @@ class TunnelListFragment : BaseFragment() {
     private var actionMode: ActionMode? = null
     private var backPressedCallback: OnBackPressedCallback? = null
     private var binding: TunnelListFragmentBinding? = null
+    private var warpStageHideJob: Job? = null
     private val warpVpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -126,7 +128,7 @@ class TunnelListFragment : BaseFragment() {
                         }
 
                         AddTunnelsSheet.REQUEST_CREATE_WARP -> {
-                            createWarpProfile()
+                            prepareVerifiedWarpProfile()
                         }
 
                         AddTunnelsSheet.REQUEST_IMPORT -> {
@@ -222,26 +224,6 @@ class TunnelListFragment : BaseFragment() {
             Toast.makeText(activity ?: Application.get(), message, Toast.LENGTH_SHORT).show()
     }
 
-    private fun createWarpProfile() {
-        showSnackbar(getString(R.string.warp_profile_creating))
-        viewLifecycleOwner.lifecycleScope.launch {
-            runCatching {
-                val config = WarpProvisioner(requireContext()).createProfile()
-                val manager = Application.getTunnelManager()
-                val tunnels = manager.getTunnels()
-                var name = "WARP"
-                var suffix = 2
-                while (tunnels.containsKey(name)) name = "WARP-${suffix++}"
-                manager.create(name, config)
-            }.onSuccess { tunnel ->
-                showSnackbar(getString(R.string.warp_profile_created, tunnel.name))
-            }.onFailure { error ->
-                Log.e(TAG, "WARP profile creation failed", error)
-                showSnackbar(getString(R.string.warp_profile_error, ErrorMessages[error]))
-            }
-        }
-    }
-
     private fun prepareVerifiedWarpProfile() {
         val activity = activity ?: return
         viewLifecycleOwner.lifecycleScope.launch {
@@ -256,6 +238,10 @@ class TunnelListFragment : BaseFragment() {
                 createAndVerifyWarpProfile()
             } catch (error: Throwable) {
                 Log.e(TAG, "Could not prepare Android VPN service", error)
+                updateWarpStage(
+                    getString(R.string.warp_stage_failed, ErrorMessages[error]),
+                    autoHide = true,
+                )
                 showSnackbar(getString(R.string.warp_profile_error, ErrorMessages[error]))
             }
         }
@@ -264,6 +250,7 @@ class TunnelListFragment : BaseFragment() {
     private fun createAndVerifyWarpProfile() {
         val currentBinding = binding ?: return
         currentBinding.optimizeWarpFab.isEnabled = false
+        updateWarpStage(getString(R.string.warp_stage_preparing))
         showSnackbar(getString(R.string.warp_verified_testing))
         viewLifecycleOwner.lifecycleScope.launch {
             var createdTunnel: ObservableTunnel? = null
@@ -287,11 +274,18 @@ class TunnelListFragment : BaseFragment() {
 
                         val verifiedRoutes = mutableListOf<VerifiedWarpRoute>()
                         for ((index, candidate) in candidates.withIndex()) {
+                            updateWarpStage(getString(
+                                R.string.warp_stage_scanning,
+                                index + 1,
+                                candidates.size,
+                                candidate.endpoint.authority,
+                            ))
                             Log.i(TAG, "Testing WARP candidate ${index + 1}/${candidates.size}: ${candidate.endpoint.authority}")
                             if (index > 0) tunnel.setConfigAsync(candidate.config)
                             val attemptStartedAt = System.currentTimeMillis() / 1000L - 1L
                             val attemptStartedElapsed = SystemClock.elapsedRealtime()
                             tunnel.setStateAsync(Tunnel.State.UP)
+                            updateWarpStage(getString(R.string.warp_stage_handshake, candidate.endpoint.authority))
                             val handshakeWaitSeconds = if (index < LONG_HANDSHAKE_ATTEMPTS)
                                 HANDSHAKE_WAIT_SECONDS else FAST_HANDSHAKE_WAIT_SECONDS
                             val handshaked = awaitFreshHandshake(
@@ -303,6 +297,7 @@ class TunnelListFragment : BaseFragment() {
                             completedHandshake = completedHandshake || handshaked
                             Log.i(TAG, "WARP handshake ${if (handshaked) "succeeded" else "timed out"}: ${candidate.endpoint.authority}")
                             if (handshaked) {
+                                updateWarpStage(getString(R.string.warp_stage_verifying))
                                 delay(DATA_PATH_SETTLE_MS)
                                 val validationStartedElapsed = SystemClock.elapsedRealtime()
                                 val routed = verifyWarpDataPath()
@@ -323,6 +318,9 @@ class TunnelListFragment : BaseFragment() {
                             if (verifiedRoutes.none { it.candidate.endpoint == candidate.endpoint })
                                 provisioner.recordEndpointFailure(candidate.endpoint)
                             tunnel.setStateAsync(Tunnel.State.DOWN)
+                            // Android may need a short window to release the previous VPN network
+                            // and UDP socket before the next endpoint is evaluated.
+                            delay(CANDIDATE_SWITCH_DELAY_MS)
                             if (verifiedRoutes.size >= VERIFIED_ROUTES_TO_COMPARE ||
                                 verifiedRoutes.isNotEmpty() && index + 1 >= MAX_DISCOVERY_ATTEMPTS)
                                 break
@@ -330,20 +328,29 @@ class TunnelListFragment : BaseFragment() {
 
                         // Reconnect the fastest fully verified route. If it changed underneath us,
                         // immediately fall through to the next verified route.
+                        updateWarpStage(getString(R.string.warp_stage_selecting))
                         for (route in verifiedRoutes.sortedBy(VerifiedWarpRoute::qualityMs)) {
                             tunnel.setConfigAsync(route.candidate.config)
                             val attemptStartedAt = System.currentTimeMillis() / 1000L - 1L
                             tunnel.setStateAsync(Tunnel.State.UP)
-                            if (awaitFreshHandshake(tunnel, attemptStartedAt, HANDSHAKE_WAIT_SECONDS))
-                                return@runCatching tunnel to route.candidate.endpoint
+                            if (awaitFreshHandshake(tunnel, attemptStartedAt, HANDSHAKE_WAIT_SECONDS)) {
+                                delay(DATA_PATH_SETTLE_MS)
+                                if (verifyWarpDataPath())
+                                    return@runCatching tunnel to route.candidate.endpoint
+                            }
                             provisioner.recordEndpointFailure(route.candidate.endpoint)
                             tunnel.setStateAsync(Tunnel.State.DOWN)
+                            delay(CANDIDATE_SWITCH_DELAY_MS)
                         }
                         if (completedHandshake)
                             error("WARP handshake succeeded, but routed Internet verification failed")
                         error("WARP did not complete a handshake on any supported endpoint")
                     }.onSuccess { (tunnel, endpoint) ->
                         selectedTunnel = tunnel
+                        updateWarpStage(
+                            getString(R.string.warp_stage_connected, endpoint.authority),
+                            autoHide = true,
+                        )
                         showSnackbar(getString(R.string.warp_verified_connected, tunnel.name, endpoint.authority))
                     }.onFailure { error ->
                         Log.e(TAG, "Verified WARP profile creation failed", error)
@@ -360,11 +367,44 @@ class TunnelListFragment : BaseFragment() {
                                 .onFailure { restoreError -> Log.e(TAG, "Could not restore previous tunnel", restoreError) }
                         }
                         val reason = error.message?.takeIf { it.isNotBlank() } ?: ErrorMessages[error]
+                        updateWarpStage(
+                            getString(R.string.warp_stage_failed, reason),
+                            autoHide = true,
+                        )
                         showSnackbar(getString(R.string.warp_verified_error, reason))
                     }
                 }
             } finally {
                 binding?.optimizeWarpFab?.isEnabled = true
+            }
+        }
+    }
+
+    private fun updateWarpStage(message: CharSequence, autoHide: Boolean = false) {
+        warpStageHideJob?.cancel()
+        binding?.apply {
+            warpStatusCard.visibility = View.VISIBLE
+            warpStatusText.text = message
+            val stageInset = (76 * resources.displayMetrics.density).toInt()
+            tunnelList.setPadding(
+                tunnelList.paddingLeft,
+                stageInset,
+                tunnelList.paddingRight,
+                tunnelList.paddingBottom,
+            )
+        }
+        if (autoHide) {
+            warpStageHideJob = viewLifecycleOwner.lifecycleScope.launch {
+                delay(STAGE_TERMINAL_VISIBILITY_MS)
+                binding?.apply {
+                    warpStatusCard.visibility = View.GONE
+                    tunnelList.setPadding(
+                        tunnelList.paddingLeft,
+                        0,
+                        tunnelList.paddingRight,
+                        tunnelList.paddingBottom,
+                    )
+                }
             }
         }
     }
@@ -386,8 +426,12 @@ class TunnelListFragment : BaseFragment() {
 
     /** A handshake proves peer authentication; this additionally proves routed Internet access. */
     private suspend fun verifyWarpDataPath(): Boolean {
+        var successes = 0
         repeat(DATA_PATH_ATTEMPTS) { attempt ->
-            if (probeWarpDataPath()) return true
+            if (probeWarpDataPath()) successes++
+            if (successes >= REQUIRED_DATA_PATH_SUCCESSES) return true
+            val remainingAttempts = DATA_PATH_ATTEMPTS - attempt - 1
+            if (successes + remainingAttempts < REQUIRED_DATA_PATH_SUCCESSES) return false
             if (attempt < DATA_PATH_ATTEMPTS - 1) delay(DATA_PATH_RETRY_DELAY_MS)
         }
         return false
@@ -564,7 +608,10 @@ class TunnelListFragment : BaseFragment() {
         private const val WARP_TRACE_URL = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
         private const val DATA_PATH_TIMEOUT_MS = 6_000
         private const val DATA_PATH_SETTLE_MS = 500L
+        private const val STAGE_TERMINAL_VISIBILITY_MS = 6_000L
         private const val DATA_PATH_ATTEMPTS = 3
+        private const val REQUIRED_DATA_PATH_SUCCESSES = 2
         private const val DATA_PATH_RETRY_DELAY_MS = 750L
+        private const val CANDIDATE_SWITCH_DELAY_MS = 500L
     }
 }

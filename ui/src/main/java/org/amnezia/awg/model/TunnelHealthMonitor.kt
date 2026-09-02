@@ -3,6 +3,7 @@ package org.amnezia.awg.model
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.PowerManager
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,8 @@ class TunnelHealthMonitor(
 ) {
     private val connectivityManager = context.applicationContext
         .getSystemService(ConnectivityManager::class.java)
+    private val powerManager = context.applicationContext.getSystemService(PowerManager::class.java)
+    private val diagnostics = ConnectionHealthStore(context.applicationContext)
     private var job: Job? = null
 
     fun start(scope: CoroutineScope) {
@@ -45,7 +48,7 @@ class TunnelHealthMonitor(
         val recoveryHistory = ArrayDeque<Long>()
 
         while (currentCoroutineContext().isActive) {
-            delay(POLL_INTERVAL_MS)
+            delay(if (powerManager.isPowerSaveMode) POWER_SAVE_POLL_INTERVAL_MS else POLL_INTERVAL_MS)
             val tunnel = withContext(Dispatchers.Main.immediate) {
                 activeTunnel()?.takeIf { it.state == Tunnel.State.UP }
             }
@@ -94,12 +97,19 @@ class TunnelHealthMonitor(
             if (!hasPhysicalInternet()) continue
 
             lastProbeAt = now
+            val degradationReason = when {
+                outgoingIsUnanswered -> "outgoing_traffic_unanswered"
+                handshakeIsMissing -> "initial_handshake_missing"
+                else -> "handshake_stale"
+            }
             if (probeTunnel()) {
                 failedProbes = 0
                 unansweredSince = 0
+                diagnostics.recordProbe(true, degradationReason, failedProbes)
                 continue
             }
             failedProbes++
+            diagnostics.recordProbe(false, degradationReason, failedProbes)
             if (failedProbes < REQUIRED_FAILURES || now - lastRecoveryAt < RECOVERY_COOLDOWN_MS)
                 continue
 
@@ -114,6 +124,7 @@ class TunnelHealthMonitor(
             unansweredSince = 0
             lastRecoveryAt = now
             recoveryHistory.addLast(now)
+            diagnostics.recordRecovery(degradationReason)
             runCatching { recover(tunnel) }
                 .onFailure { Log.e(TAG, "Automatic tunnel recovery failed", it) }
             // A restarted WireGuard device resets its byte counters even when the tunnel name stays.
@@ -126,7 +137,8 @@ class TunnelHealthMonitor(
     private fun hasPhysicalInternet(): Boolean = connectivityManager.allNetworks.any { network ->
         val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return@any false
         !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
     private suspend fun probeTunnel(): Boolean = withContext(Dispatchers.IO) {
@@ -150,6 +162,7 @@ class TunnelHealthMonitor(
         const val TAG = "FixGuard/TunnelHealth"
         const val PROBE_URL = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
         const val POLL_INTERVAL_MS = 15_000L
+        const val POWER_SAVE_POLL_INTERVAL_MS = 60_000L
         const val PROBE_INTERVAL_MS = 30_000L
         const val PROBE_TIMEOUT_MS = 6_000
         const val UNANSWERED_TRAFFIC_MS = 30_000L

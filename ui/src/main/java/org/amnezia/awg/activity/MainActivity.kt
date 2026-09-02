@@ -92,6 +92,10 @@ class MainActivity : BaseActivity(), FragmentManager.OnBackStackChangedListener 
                 startActivity(Intent(this, SettingsActivity::class.java))
                 true
             }
+            R.id.menu_warp_diagnostics -> {
+                startActivity(Intent(this, WarpDiagnosticsActivity::class.java))
+                true
+            }
 
             else -> super.onOptionsItemSelected(item)
         }

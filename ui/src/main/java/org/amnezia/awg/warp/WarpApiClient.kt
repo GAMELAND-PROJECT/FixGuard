@@ -43,8 +43,8 @@ class WarpApiClient {
         val endpointHost = endpointObject.optString("host").takeIf(::isValidEndpoint).orEmpty()
         val endpointV4 = endpointObject.optString("v4").takeIf(::isValidEndpoint).orEmpty()
         val endpointV6 = endpointObject.optString("v6").takeIf(::isValidEndpoint).orEmpty()
-        val endpoint = endpointHost.ifBlank { endpointV4 }
-            .ifBlank { endpointV6 }
+        val endpoint = endpointV4.ifBlank { endpointV6 }
+            .ifBlank { endpointHost }
             .takeIf(::isValidEndpoint)
             ?: DEFAULT_ENDPOINT
 
@@ -94,7 +94,13 @@ class WarpApiClient {
                 ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (status !in 200..299) {
                 val message = runCatching { JSONObject(responseText).optString("message") }.getOrNull()
-                throw WarpApiException(status, message?.takeIf { it.isNotBlank() } ?: "WARP API request failed")
+                val retryAfterMs = connection.getHeaderField("Retry-After")
+                    ?.toLongOrNull()?.times(1_000L)
+                throw WarpApiException(
+                    status,
+                    message?.takeIf { it.isNotBlank() } ?: "WARP API request failed",
+                    retryAfterMs,
+                )
             }
             return JSONObject(responseText)
         } finally {
@@ -113,10 +119,16 @@ class WarpApiClient {
     private companion object {
         const val API_URL = "https://api.cloudflareclient.com"
         const val API_VERSION = "v0a1922"
-        const val DEFAULT_ENDPOINT = "engage.cloudflareclient.com:2408"
+        // Used only if the API omits both numeric endpoint fields. Keep it numeric so tunnel
+        // discovery never needs to test or persist an endpoint hostname.
+        const val DEFAULT_ENDPOINT = "162.159.192.1:2408"
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 30_000
     }
 }
 
-class WarpApiException(val statusCode: Int, message: String) : Exception(message)
+class WarpApiException(
+    val statusCode: Int,
+    message: String,
+    val retryAfterMs: Long? = null,
+) : Exception(message)

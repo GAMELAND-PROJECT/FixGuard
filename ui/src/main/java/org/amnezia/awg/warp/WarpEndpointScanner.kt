@@ -11,6 +11,9 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.InetSocketAddress
+import java.net.Inet4Address
+import java.net.Inet6Address
+import java.net.InetAddress
 import java.net.Socket
 import kotlin.random.Random
 
@@ -28,12 +31,18 @@ class WarpEndpointScanner(context: Context) {
 
     suspend fun select(apiEndpoint: String, forceRefresh: Boolean = false): WarpEndpointSelection {
         val network = currentPhysicalNetwork()
-        val apiCandidate = parseEndpoint(apiEndpoint)
+        // The API also returns a hostname, but connection testing and generated profiles must use
+        // numeric addresses only. This predicate never performs DNS resolution for hostnames.
+        val apiCandidate = parseEndpoint(apiEndpoint)?.takeIf { isNumericIp(it.host) }
         val selectedPort = apiCandidate?.port?.takeIf(WARP_PORTS::contains) ?: DEFAULT_PORT
         // Include the algorithm version and port in the key so selections written by the old
         // random-port implementation can never be restored from cache.
-        val networkKey = "${currentNetworkKey(network)}:warp-endpoint-v3:$selectedPort"
-        if (!forceRefresh) cache.load(networkKey)?.let { return it }
+        val networkKey = "${currentNetworkKey(network)}:warp-endpoint-v4:$selectedPort"
+        if (!forceRefresh) cache.load(networkKey)?.let { cached ->
+            if (isNumericIp(cached.primary.host)) {
+                return cached.copy(fallbacks = cached.fallbacks.filter { isNumericIp(it.host) })
+            }
+        }
 
         val candidates = buildCandidates(apiCandidate, selectedPort)
         val measured = withTimeoutOrNull(SCAN_BUDGET_MS) {
@@ -55,7 +64,7 @@ class WarpEndpointScanner(context: Context) {
         } else {
             val safe = apiCandidate
                 ?.copy(port = selectedPort)
-                ?: WarpEndpoint(DEFAULT_HOST, DEFAULT_PORT, Long.MAX_VALUE)
+                ?: WarpEndpoint(DEFAULT_IPV4, DEFAULT_PORT, Long.MAX_VALUE)
             WarpEndpointSelection(safe, emptyList())
         }
         cache.save(networkKey, selected)
@@ -67,12 +76,15 @@ class WarpEndpointScanner(context: Context) {
      * the hosts; the caller must validate these official UDP ports with the AWG backend itself.
      */
     suspend fun connectionCandidates(apiEndpoints: List<String>): List<WarpEndpoint> {
-        val parsedApiEndpoints = apiEndpoints.mapNotNull(::parseEndpoint).distinctBy(WarpEndpoint::authority)
-        val canonicalApi = parsedApiEndpoints.firstOrNull()?.authority ?: "$DEFAULT_HOST:$DEFAULT_PORT"
+        val parsedApiEndpoints = apiEndpoints.mapNotNull(::parseEndpoint)
+            .filter { isNumericIp(it.host) }
+            .distinctBy(WarpEndpoint::authority)
+        val canonicalApi = parsedApiEndpoints.firstOrNull()?.authority ?: "$DEFAULT_IPV4:$DEFAULT_PORT"
         val selection = select(canonicalApi, forceRefresh = true)
         val apiCandidate = parsedApiEndpoints.firstOrNull()
         val networkKey = currentNetworkKey(currentPhysicalNetwork())
-        val proven = history.ranked(networkKey)
+        // Drop hostname entries saved by older versions so they can never re-enter a profile.
+        val proven = history.ranked(networkKey).filter { isNumericIp(it.host) }
         val endpoints = (proven + parsedApiEndpoints + selection.primary + selection.fallbacks)
             .distinctBy(WarpEndpoint::host)
         val preferredPort = apiCandidate?.port?.takeIf(WARP_PORTS::contains)
@@ -139,6 +151,21 @@ class WarpEndpointScanner(context: Context) {
         return WarpEndpoint(host, port, Long.MAX_VALUE)
     }
 
+    private fun isNumericIp(host: String): Boolean {
+        if (host.isBlank()) return false
+        if (IPV4_SHAPE.matches(host)) {
+            val parts = host.split('.')
+            if (parts.size != 4 || parts.any { part ->
+                    part.toIntOrNull()?.let { value -> value in 0..255 } != true
+                }) return false
+            return runCatching { InetAddress.getByName(host) is Inet4Address }.getOrDefault(false)
+        }
+        // Requiring a colon and IPv6-only characters guarantees getByName cannot resolve a DNS
+        // hostname. It is used only as the final syntax validator for a numeric literal.
+        if (':' !in host || !IPV6_SHAPE.matches(host)) return false
+        return runCatching { InetAddress.getByName(host) is Inet6Address }.getOrDefault(false)
+    }
+
     private fun currentPhysicalNetwork(): Network? {
         val manager = appContext.getSystemService(ConnectivityManager::class.java)
         val candidates = manager.allNetworks.filter { network ->
@@ -168,13 +195,13 @@ class WarpEndpointScanner(context: Context) {
     }
 
     private companion object {
-        const val DEFAULT_HOST = "engage.cloudflareclient.com"
+        const val DEFAULT_IPV4 = "162.159.192.1"
         const val DEFAULT_PORT = 2408
         const val PROBE_PORT = 443
         const val CONNECT_TIMEOUT_MS = 800
         const val SCAN_BUDGET_MS = 4_500L
         const val MAX_CONCURRENCY = 8
-        // 32 generated candidates fit in five 800 ms waves with concurrency 8.
+        // 24 generated candidates fit in three 800 ms waves with concurrency 8.
         const val SAMPLES_PER_PREFIX = 4
         const val RESULT_COUNT = 8
         const val MAX_HANDSHAKE_CANDIDATES = 12
@@ -191,5 +218,7 @@ class WarpEndpointScanner(context: Context) {
             // authenticated handshake and routed-data verification succeed on this device.
             "188.114.96", "188.114.97", "188.114.98", "188.114.99",
         )
+        val IPV4_SHAPE = Regex("^[0-9]{1,3}(?:\\.[0-9]{1,3}){3}$")
+        val IPV6_SHAPE = Regex("^[0-9a-fA-F:]+$")
     }
 }

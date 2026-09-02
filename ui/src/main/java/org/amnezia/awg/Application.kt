@@ -50,6 +50,7 @@ class Application : android.app.Application() {
     private lateinit var toolsInstaller: ToolsInstaller
     private lateinit var tunnelManager: TunnelManager
     private lateinit var networkState: NetworkState
+    private var networkChangeJob: Job? = null
 
     override fun attachBaseContext(context: Context) {
         super.attachBaseContext(context)
@@ -147,37 +148,17 @@ class Application : android.app.Application() {
     private fun onNetworkChange(oldType: NetworkType, newType: NetworkType) {
         Log.i(TAG, "onNetworkChange called: $oldType -> $newType")
         
+        networkChangeJob?.cancel()
         if (newType == NetworkType.NONE) {
             Log.i(TAG, "Network lost, waiting for new connection...")
             return
         }
 
-        coroutineScope.launch {
+        networkChangeJob = coroutineScope.launch {
+            kotlinx.coroutines.delay(NETWORK_CHANGE_DEBOUNCE_MS)
             try {
-                val activeTunnels = tunnelManager.getTunnels().filter { 
-                    it.state == org.amnezia.awg.backend.Tunnel.State.UP 
-                }
-
-                if (activeTunnels.isEmpty()) {
-                    Log.d(TAG, "No active tunnels, skipping reconnection")
-                    return@launch
-                }
-
-                Log.i(TAG, "Reconnecting ${activeTunnels.size} tunnel(s) after network change: $oldType -> $newType")
-
-                for (tunnel in activeTunnels) {
-                    try {
-                        Log.d(TAG, "Disconnecting tunnel: ${tunnel.name}")
-                        // Toggle tunnel off and on to reconnect
-                        tunnel.setStateAsync(org.amnezia.awg.backend.Tunnel.State.DOWN)
-                        kotlinx.coroutines.delay(500) // Small delay for cleanup
-                        Log.d(TAG, "Reconnecting tunnel: ${tunnel.name}")
-                        tunnel.setStateAsync(org.amnezia.awg.backend.Tunnel.State.UP)
-                        Log.i(TAG, "Successfully reconnected tunnel: ${tunnel.name}")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to reconnect tunnel ${tunnel.name}", e)
-                    }
-                }
+                tunnelManager.reconnectAfterNetworkChange()
+                Log.i(TAG, "Active tunnels rebound to the best-known $newType route")
             } catch (e: Exception) {
                 Log.e(TAG, "Error during network change handling", e)
             }
@@ -186,6 +167,7 @@ class Application : android.app.Application() {
 
     companion object {
         val USER_AGENT = String.format(Locale.ENGLISH, "AmneziaWG/%s (Android %d; %s; %s; %s %s; %s)", BuildConfig.VERSION_NAME, Build.VERSION.SDK_INT, if (Build.SUPPORTED_ABIS.isNotEmpty()) Build.SUPPORTED_ABIS[0] else "unknown ABI", Build.BOARD, Build.MANUFACTURER, Build.MODEL, Build.FINGERPRINT)
+        private const val NETWORK_CHANGE_DEBOUNCE_MS = 1_250L
         private const val TAG = "AmneziaWG/Application"
         private lateinit var weakSelf: WeakReference<Application>
 
