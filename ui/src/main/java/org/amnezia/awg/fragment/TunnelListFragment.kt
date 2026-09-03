@@ -38,6 +38,8 @@ import org.amnezia.awg.activity.TunnelCreatorActivity
 import org.amnezia.awg.databinding.ObservableKeyedRecyclerViewAdapter.RowConfigurationHandler
 import org.amnezia.awg.databinding.TunnelListFragmentBinding
 import org.amnezia.awg.databinding.TunnelListItemBinding
+import org.amnezia.awg.databinding.ObservableSortedKeyedArrayList
+import org.amnezia.awg.model.TunnelComparator
 import org.amnezia.awg.model.ObservableTunnel
 import org.amnezia.awg.util.ErrorMessages
 import org.amnezia.awg.util.QrCodeFromFileScanner
@@ -211,7 +213,15 @@ class TunnelListFragment : BaseFragment() {
         super.onViewStateRestored(savedInstanceState)
         binding ?: return
         binding!!.fragment = this
-        lifecycleScope.launch { binding!!.tunnels = Application.getTunnelManager().getTunnels() }
+        lifecycleScope.launch {
+            val allTunnels = Application.getTunnelManager().getTunnels()
+            // Hide WARP profiles from visual list — they are handled by the smart connect button
+            val filtered = ObservableSortedKeyedArrayList<String, ObservableTunnel>(TunnelComparator)
+            for (t in allTunnels) {
+                if (!isWarpProfile(t)) filtered.add(t)
+            }
+            binding!!.tunnels = filtered
+        }
         refreshSmartConnectUi()
         binding!!.rowConfigurationHandler = object : RowConfigurationHandler<TunnelListItemBinding, ObservableTunnel> {
             override fun onConfigureRow(binding: TunnelListItemBinding, item: ObservableTunnel, position: Int) {
@@ -252,11 +262,13 @@ class TunnelListFragment : BaseFragment() {
         }
     }
 
+    /** WARP profiles are managed by the central connect button and stay hidden from the list. */
+    private fun isWarpProfile(tunnel: ObservableTunnel): Boolean =
+        tunnel.name.startsWith(WARP_TUNNEL_PREFIX)
+
     private fun onSmartConnectClicked() {
-        // Prevent duplicate clicks while a job is running, but allow user-initiated disconnect
         if (smartConnectJob?.isActive == true) {
-            // If user clicks while connecting, try to cancel/abort
-            showSnackbar("Cancelling connection attempt...")
+            showSnackbar(getString(R.string.smart_connect_busy))
             return
         }
         smartConnectJob = viewLifecycleOwner.lifecycleScope.launch {
@@ -272,8 +284,7 @@ class TunnelListFragment : BaseFragment() {
                 return@launch
             }
 
-            val reusable = manager.lastUsedTunnel?.takeIf { it.name.startsWith(WARP_TUNNEL_PREFIX) }
-                ?: tunnels.firstOrNull { it.name.startsWith(WARP_TUNNEL_PREFIX) }
+            val reusable = tunnels.firstOrNull { isWarpProfile(it) }
             if (reusable == null) {
                 setSmartConnectBusy(true, getString(R.string.smart_connect_preparing))
                 prepareVerifiedWarpProfile()
