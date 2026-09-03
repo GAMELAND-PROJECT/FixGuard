@@ -27,25 +27,31 @@
         android:background="?attr/colorSurface"
         android:clipChildren="false">
 
+        <!-- Top status banner — only visible during WARP connection state changes -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/warp_status_card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="top"
-            android:layout_margin="12dp"
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginTop="12dp"
             android:visibility="gone"
-            app:cardCornerRadius="16dp"
-            app:cardElevation="2dp">
+            app:cardBackgroundColor="?attr/colorPrimaryContainer"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="0dp">
 
             <TextView
                 android:id="@+id/warp_status_text"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:padding="16dp"
+                android:paddingHorizontal="20dp"
+                android:paddingVertical="14dp"
                 android:textAppearance="?attr/textAppearanceBodyLarge"
+                android:textColor="?attr/colorOnPrimaryContainer"
                 tools:text="در حال بررسی بهترین مسیر WARP…" />
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Smart connect (centerpiece) panel — beautiful gradient + glowing button -->
         <LinearLayout
             android:id="@+id/smart_connect_panel"
             android:layout_width="match_parent"
@@ -53,15 +59,47 @@
             android:layout_gravity="center"
             android:gravity="center"
             android:orientation="vertical"
-            android:paddingHorizontal="28dp"
-            android:paddingBottom="160dp">
+            android:paddingHorizontal="32dp"
+            android:paddingBottom="180dp">
+
+            <!-- Status pill: shows current state (Disconnected / Connected / Connecting) -->
+            <LinearLayout
+                android:id="@+id/status_pill"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="28dp"
+                android:background="@drawable/bg_status_pill"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="18dp"
+                android:paddingVertical="8dp">
+
+                <View
+                    android:id="@+id/status_dot"
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/bg_status_dot_disconnected" />
+
+                <TextView
+                    android:id="@+id/status_pill_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.08"
+                    android:text="@string/smart_disconnect"
+                    android:textAllCaps="true"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
             <FrameLayout
-                android:layout_width="220dp"
-                android:layout_height="220dp"
+                android:layout_width="240dp"
+                android:layout_height="240dp"
                 android:clipChildren="false"
                 android:clipToPadding="false">
 
+                <!-- Outer glow ring (rotates while connecting) -->
                 <com.google.android.material.progressindicator.CircularProgressIndicator
                     android:id="@+id/smart_connect_progress"
                     android:layout_width="match_parent"
@@ -69,38 +107,54 @@
                     android:indeterminate="true"
                     android:visibility="gone"
                     app:indicatorColor="?attr/colorPrimary"
-                    app:indicatorInset="8dp"
-                    app:indicatorSize="200dp"
-                    app:trackColor="?attr/colorSurfaceVariant"
-                    app:trackThickness="6dp" />
+                    app:indicatorInset="4dp"
+                    app:indicatorSize="232dp"
+                    app:trackColor="@android:color/transparent"
+                    app:trackThickness="4dp" />
+
+                <!-- Halo behind button (subtle pulse effect when active) -->
+                <View
+                    android:id="@+id/smart_connect_halo"
+                    android:layout_width="220dp"
+                    android:layout_height="220dp"
+                    android:layout_gravity="center"
+                    android:alpha="0.18"
+                    android:background="@drawable/bg_smart_button_halo" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/smart_connect_button"
+                    style="@style/Widget.Material3.Button.Icon"
                     android:layout_width="200dp"
                     android:layout_height="200dp"
                     android:layout_gravity="center"
+                    android:backgroundTint="?attr/colorPrimary"
                     android:contentDescription="@string/smart_connect"
                     android:insetLeft="0dp"
                     android:insetTop="0dp"
                     android:insetRight="0dp"
                     android:insetBottom="0dp"
+                    android:stateListAnimator="@null"
                     android:text="@string/smart_connect"
                     android:textAllCaps="false"
+                    android:textColor="?attr/colorOnPrimary"
                     android:textSize="20sp"
                     android:textStyle="bold"
                     app:cornerRadius="100dp"
                     app:icon="@drawable/ic_action_generate"
                     app:iconGravity="textTop"
-                    app:iconPadding="12dp"
-                    app:iconSize="36dp" />
+                    app:iconPadding="10dp"
+                    app:iconSize="40dp"
+                    app:iconTint="?attr/colorOnPrimary" />
             </FrameLayout>
 
             <TextView
                 android:id="@+id/smart_connect_caption"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
+                android:layout_marginTop="24dp"
+                android:alpha="0.85"
                 android:gravity="center"
+                android:letterSpacing="0.02"
                 android:maxLines="2"
                 android:text="@string/smart_connect_ready"
                 android:textAppearance="?attr/textAppearanceBodyLarge"
@@ -133,11 +187,11 @@
 
             <androidx.appcompat.widget.AppCompatImageView
                 android:id="@+id/logo_placeholder"
-                android:layout_width="140dp"
-                android:layout_height="140dp"
+                android:layout_width="120dp"
+                android:layout_height="120dp"
                 android:layout_gravity="center"
-                android:layout_marginBottom="20dp"
-                android:alpha="0.3333333"
+                android:layout_marginBottom="16dp"
+                android:alpha="0.2"
                 android:src="@drawable/ic_icon" />
 
             <TextView
@@ -146,8 +200,10 @@
                 android:layout_gravity="center"
                 android:layout_marginStart="@dimen/tunnel_list_placeholder_margin"
                 android:layout_marginEnd="@dimen/tunnel_list_placeholder_margin"
+                android:alpha="0.6"
+                android:letterSpacing="0.04"
                 android:text="@string/tunnel_list_placeholder"
-                android:textSize="20sp" />
+                android:textSize="14sp" />
         </LinearLayout>
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -156,6 +212,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|end"
             android:layout_margin="@dimen/fab_margin"
+            android:contentDescription="@string/create_tunnel"
             android:nextFocusUp="@id/tunnel_list"
             app:srcCompat="@drawable/ic_action_add_white" />
 
