@@ -40,9 +40,7 @@ abstract class BaseActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Tunnel profiles contain cryptographic material. Keep them out of screenshots,
-        // screen recordings, previews in Recents, and untrusted display capture.
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // Screenshot blocking removed for user testing (was: FLAG_SECURE)
 
         // Restore the saved tunnel if there is one; otherwise grab it from the arguments.
         val savedTunnelName = when {

@@ -354,8 +354,8 @@ public final class GoBackend implements Backend {
             service.setOwner(this);
 
             if (currentTunnelHandle != -1) {
-                Log.w(TAG, "Tunnel already up");
-                return;
+                Log.w(TAG, "Tunnel already up, turning it off first");
+                setStateInternal(currentTunnel, null, State.DOWN);
             }
 
 

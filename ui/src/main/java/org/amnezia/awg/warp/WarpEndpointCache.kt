@@ -11,7 +11,9 @@ class WarpEndpointCache(context: Context) {
         val raw = preferences.getString(networkKey, null) ?: return null
         return runCatching {
             val root = JSONObject(raw)
-            if (now - root.getLong("savedAt") > MAX_AGE_MS) return null
+            val savedAt = root.optLong("savedAt", 0L)
+            // Security fix: never use cached endpoints older than max age (prevents stale/replayed routes)
+            if (now - savedAt > MAX_AGE_MS || savedAt < 1) return null
             val endpoints = root.getJSONArray("endpoints").toEndpoints()
             if (endpoints.isEmpty()) null
             else WarpEndpointSelection(endpoints.first(), endpoints.drop(1))

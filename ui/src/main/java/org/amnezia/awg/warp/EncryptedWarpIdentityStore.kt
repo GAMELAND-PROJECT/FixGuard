@@ -47,6 +47,7 @@ class EncryptedWarpIdentityStore(private val context: Context) {
     fun saveAll(identities: List<WarpIdentity>) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        val iv = cipher.iv
         val encrypted = cipher.doFinal(encodePayload(identities).toString().toByteArray(Charsets.UTF_8))
         val envelope = JSONObject()
             .put("version", 2)

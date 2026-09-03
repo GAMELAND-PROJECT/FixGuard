@@ -253,7 +253,12 @@ class TunnelListFragment : BaseFragment() {
     }
 
     private fun onSmartConnectClicked() {
-        if (smartConnectJob?.isActive == true) return
+        // Prevent duplicate clicks while a job is running, but allow user-initiated disconnect
+        if (smartConnectJob?.isActive == true) {
+            // If user clicks while connecting, try to cancel/abort
+            showSnackbar("Cancelling connection attempt...")
+            return
+        }
         smartConnectJob = viewLifecycleOwner.lifecycleScope.launch {
             val manager = Application.getTunnelManager()
             val tunnels = manager.getTunnels()
@@ -320,6 +325,9 @@ class TunnelListFragment : BaseFragment() {
                 currentBinding.smartConnectCaption.setText(R.string.smart_connect_ready)
             }
             currentBinding.smartConnectProgress.visibility = View.GONE
+            // CRITICAL: Re-bind click listener to recover from cases where the button lost its handler
+            currentBinding.smartConnectButton.setOnClickListener { onSmartConnectClicked() }
+            currentBinding.smartConnectButton.isEnabled = true
             stopSmartConnectAnimation()
         }
     }
@@ -412,6 +420,8 @@ class TunnelListFragment : BaseFragment() {
                         while (tunnels.containsKey(name)) name = "WARP-${suffix++}"
                         val tunnel = manager.create(name, candidates.first().config)
                         createdTunnel = tunnel
+                        // Force immediate refresh so new WARP profile appears in list
+                        refreshSmartConnectUi()
                         var completedHandshake = false
 
                         val verifiedRoutes = mutableListOf<VerifiedWarpRoute>()

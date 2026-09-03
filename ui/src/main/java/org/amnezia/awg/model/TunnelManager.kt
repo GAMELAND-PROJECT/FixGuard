@@ -460,7 +460,9 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
             }
         } catch (e: Throwable) {
             throwable = e
-            newState = Tunnel.State.DOWN
+            // Query the actual state from the backend to ensure UI stays consistent with reality
+            newState = runCatching { withContext(Dispatchers.IO) { getBackend().getState(tunnel) } }
+                .getOrDefault(Tunnel.State.DOWN)
             tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.DISCONNECTED)
         }
         tunnel.onStateChanged(newState)
