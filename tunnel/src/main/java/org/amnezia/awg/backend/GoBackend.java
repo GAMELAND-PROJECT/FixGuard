@@ -429,7 +429,7 @@ public final class GoBackend implements Backend {
                 currentTunnelHandle = awgTurnOn(tunnel.getName(), tun.detachFd(), goConfig);
             }
             if (currentTunnelHandle < 0)
-                throw new BackendException(Reason.GO_ACTIVATION_ERROR_CODE, currentTunnelHandle);
+                throw new BackendException(Reason.GO_ACTIVATION_ERROR_CODE);
 
             currentTunnel = tunnel;
             currentConfig = config;
