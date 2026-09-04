@@ -77,9 +77,10 @@ class TunnelDetailFragment : BaseFragment(), MenuProvider {
         if (newTunnel == null) {
             binding.config = null
         } else {
+            // Hide config details from the detail view — only show connection status and stats
             lifecycleScope.launch {
                 try {
-                    binding.config = newTunnel.getConfigAsync()
+                    binding.config = null
                 } catch (_: Throwable) {
                     binding.config = null
                 }

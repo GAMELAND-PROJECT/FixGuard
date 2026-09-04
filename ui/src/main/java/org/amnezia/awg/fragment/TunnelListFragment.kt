@@ -331,9 +331,13 @@ class TunnelListFragment : BaseFragment() {
             if (active != null) {
                 currentBinding.smartConnectButton.setText(R.string.smart_disconnect)
                 currentBinding.smartConnectCaption.setText(R.string.smart_connect_connected)
+                currentBinding.smartConnectButton.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFD32F2F.toInt())
+                currentBinding.smartConnectButton.iconTint = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
             } else {
                 currentBinding.smartConnectButton.setText(R.string.smart_connect)
                 currentBinding.smartConnectCaption.setText(R.string.smart_connect_ready)
+                currentBinding.smartConnectButton.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF1F6FEB.toInt())
+                currentBinding.smartConnectButton.iconTint = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
             }
             currentBinding.smartConnectProgress.visibility = View.GONE
             // CRITICAL: Re-bind click listener to recover from cases where the button lost its handler
