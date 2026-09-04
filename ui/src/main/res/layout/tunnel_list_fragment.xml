@@ -24,7 +24,7 @@
         android:id="@+id/main_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="?attr/colorSurface"
+        android:background="#0D1117"
         android:clipChildren="false">
 
         <!-- Top status banner — only visible during WARP connection state changes -->
@@ -127,7 +127,7 @@
                     android:layout_width="200dp"
                     android:layout_height="200dp"
                     android:layout_gravity="center"
-                    android:backgroundTint="?attr/colorPrimary"
+                    android:backgroundTint="#1F6FEB"
                     android:contentDescription="@string/smart_connect"
                     android:insetLeft="0dp"
                     android:insetTop="0dp"
@@ -136,15 +136,16 @@
                     android:stateListAnimator="@null"
                     android:text="@string/smart_connect"
                     android:textAllCaps="false"
-                    android:textColor="?attr/colorOnPrimary"
-                    android:textSize="20sp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="22sp"
                     android:textStyle="bold"
                     app:cornerRadius="100dp"
                     app:icon="@drawable/ic_action_generate"
                     app:iconGravity="textTop"
-                    app:iconPadding="10dp"
-                    app:iconSize="40dp"
-                    app:iconTint="?attr/colorOnPrimary" />
+                    app:iconPadding="12dp"
+                    app:iconSize="48dp"
+                    app:iconTint="#FFFFFF"
+                    app:rippleColor="#3FB950" />
             </FrameLayout>
 
             <TextView
@@ -180,30 +181,21 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="180dp"
             android:orientation="vertical"
             android:visibility="@{tunnels.size() == 0 ? android.view.View.VISIBLE : android.view.View.GONE}"
-            tools:visibility="gone">
-
-            <androidx.appcompat.widget.AppCompatImageView
-                android:id="@+id/logo_placeholder"
-                android:layout_width="120dp"
-                android:layout_height="120dp"
-                android:layout_gravity="center"
-                android:layout_marginBottom="16dp"
-                android:alpha="0.2"
-                android:src="@drawable/ic_icon" />
+            tools:visibility="visible">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
-                android:layout_marginStart="@dimen/tunnel_list_placeholder_margin"
-                android:layout_marginEnd="@dimen/tunnel_list_placeholder_margin"
-                android:alpha="0.6"
+                android:alpha="0.5"
                 android:letterSpacing="0.04"
                 android:text="@string/tunnel_list_placeholder"
-                android:textSize="14sp" />
+                android:textColor="#8B949E"
+                android:textSize="13sp" />
         </LinearLayout>
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
