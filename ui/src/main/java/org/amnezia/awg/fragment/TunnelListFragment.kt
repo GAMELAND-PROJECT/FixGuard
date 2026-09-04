@@ -513,7 +513,11 @@ class TunnelListFragment : BaseFragment() {
                             error("WARP handshake succeeded, but routed Internet verification failed")
                         error("WARP did not complete a handshake on any supported endpoint")
                     }.onSuccess { (tunnel, endpoint) ->
-                        selectedTunnel = tunnel
+                        // Keep WARP profiles hidden — don't navigate to TunnelDetailFragment
+                        // Just update the smart connect button state and show success
+                        viewLifecycleOwner.lifecycleScope.launch {
+                            refreshSmartConnectUi()
+                        }
                         updateWarpStage(
                             getString(R.string.warp_stage_connected, endpoint.authority),
                             autoHide = true,

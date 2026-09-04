@@ -110,6 +110,13 @@ class MainActivity : BaseActivity(), FragmentManager.OnBackStackChangedListener 
             return false
         }
 
+        // Hide detail fragment for WARP-managed profiles — they should never open the config view
+        if (newTunnel != null && newTunnel.name.startsWith("WARP")) {
+            // Pop any open detail/editor fragments and stay on the list
+            fragmentManager.popBackStackImmediate(0, FragmentManager.POP_BACK_STACK_INCLUSIVE)
+            return true
+        }
+
         val backStackEntries = fragmentManager.backStackEntryCount
         if (newTunnel == null) {
             // Clear everything off the back stack (all editors and detail fragments).
