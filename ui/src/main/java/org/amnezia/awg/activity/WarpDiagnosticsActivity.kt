@@ -91,7 +91,7 @@ class WarpDiagnosticsActivity : BaseActivity() {
             appendLine("Health failures: ${health.consecutiveFailures}")
             appendLine("Last recovery: ${relativeTime(health.lastRecoveryAt)} / ${health.lastReason}")
             appendLine()
-            appendLine("WARP identity: ${if (account.registered) "stored securely" else "not created"}")
+            appendLine("WARP identities: ${account.identityCount} ${if (account.registered) "stored securely" else "not created"}")
             appendLine("Account type: ${account.accountType}")
             appendLine("Device / WARP flags: ${account.deviceEnabled ?: "unknown"} / ${account.warpEnabled ?: "unknown"}")
             appendLine("Identity updated: ${account.updatedAt}")

@@ -4,6 +4,7 @@
  */
 package org.amnezia.awg.fragment
 
+import android.animation.ObjectAnimator
 import android.content.Intent
 import android.app.Activity
 import android.content.res.Resources
@@ -17,6 +18,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.animation.Animation
 import android.view.animation.AnimationUtils
+import android.view.animation.LinearInterpolator
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.addCallback
@@ -63,11 +65,24 @@ class TunnelListFragment : BaseFragment() {
     private var backPressedCallback: OnBackPressedCallback? = null
     private var binding: TunnelListFragmentBinding? = null
     private var warpStageHideJob: Job? = null
+    private var smartConnectJob: Job? = null
+    private var smartConnectAnimator: ObjectAnimator? = null
+    private var pendingSmartConnectTunnel: ObservableTunnel? = null
     private val warpVpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) createAndVerifyWarpProfile()
-        else showSnackbar(getString(R.string.warp_profile_permission_required))
+        val pendingTunnel = pendingSmartConnectTunnel
+        pendingSmartConnectTunnel = null
+        if (result.resultCode == Activity.RESULT_OK) {
+            if (pendingTunnel != null) {
+                viewLifecycleOwner.lifecycleScope.launch { connectReusableWarpTunnel(pendingTunnel) }
+            } else {
+                createAndVerifyWarpProfile()
+            }
+        } else {
+            setSmartConnectBusy(false)
+            showSnackbar(getString(R.string.warp_profile_permission_required))
+        }
     }
     private val tunnelFileImportResultLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { data ->
         if (data == null) return@registerForActivityResult
@@ -107,6 +122,7 @@ class TunnelListFragment : BaseFragment() {
                 for (i in checkedItems) actionModeListener.setItemChecked(i, true)
             }
         }
+        warmUpWarpIdentities()
     }
 
     override fun onCreateView(
@@ -117,6 +133,7 @@ class TunnelListFragment : BaseFragment() {
         binding = TunnelListFragmentBinding.inflate(inflater, container, false)
         val bottomSheet = AddTunnelsSheet()
         binding?.apply {
+            smartConnectButton.setOnClickListener { onSmartConnectClicked() }
             optimizeWarpFab.setOnClickListener { prepareVerifiedWarpProfile() }
             createFab.setOnClickListener {
                 if (childFragmentManager.findFragmentByTag("BOTTOM_SHEET") != null)
@@ -156,6 +173,8 @@ class TunnelListFragment : BaseFragment() {
     }
 
     override fun onDestroyView() {
+        smartConnectAnimator?.cancel()
+        smartConnectAnimator = null
         binding = null
         super.onDestroyView()
     }
@@ -171,6 +190,7 @@ class TunnelListFragment : BaseFragment() {
             val tunnels = Application.getTunnelManager().getTunnels()
             if (newTunnel != null) viewForTunnel(newTunnel, tunnels)?.setSingleSelected(true)
             if (oldTunnel != null) viewForTunnel(oldTunnel, tunnels)?.setSingleSelected(false)
+            refreshSmartConnectUi()
         }
     }
 
@@ -192,6 +212,7 @@ class TunnelListFragment : BaseFragment() {
         binding ?: return
         binding!!.fragment = this
         lifecycleScope.launch { binding!!.tunnels = Application.getTunnelManager().getTunnels() }
+        refreshSmartConnectUi()
         binding!!.rowConfigurationHandler = object : RowConfigurationHandler<TunnelListItemBinding, ObservableTunnel> {
             override fun onConfigureRow(binding: TunnelListItemBinding, item: ObservableTunnel, position: Int) {
                 binding.fragment = this@TunnelListFragment
@@ -222,6 +243,127 @@ class TunnelListFragment : BaseFragment() {
                 .show()
         else
             Toast.makeText(activity ?: Application.get(), message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun warmUpWarpIdentities() {
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { WarpProvisioner(requireContext()).ensureIdentityPool() }
+                .onFailure { error -> Log.w(TAG, "WARP identity warm-up did not finish", error) }
+        }
+    }
+
+    private fun onSmartConnectClicked() {
+        if (smartConnectJob?.isActive == true) return
+        smartConnectJob = viewLifecycleOwner.lifecycleScope.launch {
+            val manager = Application.getTunnelManager()
+            val tunnels = manager.getTunnels()
+            val active = tunnels.firstOrNull { it.state == Tunnel.State.UP }
+            if (active != null) {
+                setSmartConnectBusy(true, getString(R.string.smart_connect_disconnecting))
+                runCatching { active.setStateAsync(Tunnel.State.DOWN) }
+                    .onFailure { error -> showSnackbar(getString(R.string.error_down, ErrorMessages[error])) }
+                setSmartConnectBusy(false)
+                refreshSmartConnectUi()
+                return@launch
+            }
+
+            val reusable = manager.lastUsedTunnel?.takeIf { it.name.startsWith(WARP_TUNNEL_PREFIX) }
+                ?: tunnels.firstOrNull { it.name.startsWith(WARP_TUNNEL_PREFIX) }
+            if (reusable == null) {
+                setSmartConnectBusy(true, getString(R.string.smart_connect_preparing))
+                prepareVerifiedWarpProfile()
+                return@launch
+            }
+
+            try {
+                if (Application.getBackend() is GoBackend) {
+                    val intent = GoBackend.VpnService.prepare(requireActivity())
+                    if (intent != null) {
+                        pendingSmartConnectTunnel = reusable
+                        warpVpnPermissionLauncher.launch(intent)
+                        return@launch
+                    }
+                }
+                connectReusableWarpTunnel(reusable)
+            } finally {
+                refreshSmartConnectUi()
+            }
+        }
+    }
+
+    private suspend fun connectReusableWarpTunnel(tunnel: ObservableTunnel) {
+        setSmartConnectBusy(true, getString(R.string.smart_connect_connecting))
+        updateWarpStage(getString(R.string.warp_stage_preparing))
+        runCatching { tunnel.setStateAsync(Tunnel.State.UP) }
+            .onSuccess {
+                selectedTunnel = tunnel
+                setSmartConnectBusy(false)
+                updateWarpStage(getString(R.string.smart_connect_connected), autoHide = true)
+            }
+            .onFailure { error ->
+                setSmartConnectBusy(false)
+                updateWarpStage(getString(R.string.warp_stage_failed, ErrorMessages[error]), autoHide = true)
+                showSnackbar(getString(R.string.error_up, ErrorMessages[error]))
+            }
+    }
+
+    private fun refreshSmartConnectUi() {
+        val currentBinding = binding ?: return
+        viewLifecycleOwner.lifecycleScope.launch {
+            val active = Application.getTunnelManager().getTunnels().firstOrNull { it.state == Tunnel.State.UP }
+            if (smartConnectJob?.isActive == true) return@launch
+            if (active != null) {
+                currentBinding.smartConnectButton.setText(R.string.smart_disconnect)
+                currentBinding.smartConnectCaption.setText(R.string.smart_connect_connected)
+            } else {
+                currentBinding.smartConnectButton.setText(R.string.smart_connect)
+                currentBinding.smartConnectCaption.setText(R.string.smart_connect_ready)
+            }
+            currentBinding.smartConnectProgress.visibility = View.GONE
+            stopSmartConnectAnimation()
+        }
+    }
+
+    private fun setSmartConnectBusy(busy: Boolean, caption: CharSequence? = null) {
+        binding?.apply {
+            smartConnectButton.isEnabled = !busy
+            smartConnectButton.setText(if (busy) R.string.smart_connecting else R.string.smart_connect)
+            caption?.let { smartConnectCaption.text = it }
+            smartConnectProgress.visibility = if (busy) View.VISIBLE else View.GONE
+            if (busy) startSmartConnectAnimation() else stopSmartConnectAnimation()
+        }
+    }
+
+    private fun startSmartConnectAnimation() {
+        val progress = binding?.smartConnectProgress ?: return
+        if (smartConnectAnimator?.isStarted == true) return
+        smartConnectAnimator = ObjectAnimator.ofFloat(progress, View.ROTATION, 0f, 360f).apply {
+            duration = SMART_CONNECT_ROTATION_MS
+            repeatCount = ObjectAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            start()
+        }
+        binding?.smartConnectButton?.animate()
+            ?.scaleX(0.94f)
+            ?.scaleY(0.94f)
+            ?.setDuration(220L)
+            ?.withEndAction {
+                binding?.smartConnectButton?.animate()
+                    ?.scaleX(1f)
+                    ?.scaleY(1f)
+                    ?.setDuration(360L)
+                    ?.start()
+            }
+            ?.start()
+    }
+
+    private fun stopSmartConnectAnimation() {
+        smartConnectAnimator?.cancel()
+        smartConnectAnimator = null
+        binding?.smartConnectProgress?.rotation = 0f
+        binding?.smartConnectButton?.animate()?.cancel()
+        binding?.smartConnectButton?.scaleX = 1f
+        binding?.smartConnectButton?.scaleY = 1f
     }
 
     private fun prepareVerifiedWarpProfile() {
@@ -376,6 +518,8 @@ class TunnelListFragment : BaseFragment() {
                 }
             } finally {
                 binding?.optimizeWarpFab?.isEnabled = true
+                setSmartConnectBusy(false)
+                refreshSmartConnectUi()
             }
         }
     }
@@ -523,7 +667,6 @@ class TunnelListFragment : BaseFragment() {
                 resources = activity!!.resources
             }
             animateFab(binding?.createFab, false)
-            animateFab(binding?.optimizeWarpFab, false)
             mode.menuInflater.inflate(R.menu.tunnel_list_action_mode, menu)
             binding?.tunnelList?.adapter?.notifyDataSetChanged()
             return true
@@ -534,7 +677,6 @@ class TunnelListFragment : BaseFragment() {
             backPressedCallback?.isEnabled = false
             resources = null
             animateFab(binding?.createFab, true)
-            animateFab(binding?.optimizeWarpFab, true)
             checkedItems.clear()
             binding?.tunnelList?.adapter?.notifyDataSetChanged()
         }
@@ -600,6 +742,8 @@ class TunnelListFragment : BaseFragment() {
     companion object {
         private const val CHECKED_ITEMS = "CHECKED_ITEMS"
         private const val TAG = "AmneziaWG/TunnelListFragment"
+        private const val WARP_TUNNEL_PREFIX = "WARP"
+        private const val SMART_CONNECT_ROTATION_MS = 1_100L
         private const val HANDSHAKE_WAIT_SECONDS = 10
         private const val FAST_HANDSHAKE_WAIT_SECONDS = 6
         private const val LONG_HANDSHAKE_ATTEMPTS = 2

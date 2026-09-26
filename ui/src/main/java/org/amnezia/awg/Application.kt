@@ -28,6 +28,7 @@ import org.amnezia.awg.util.RootShell
 import org.amnezia.awg.util.ToolsInstaller
 import org.amnezia.awg.util.UserKnobs
 import org.amnezia.awg.util.applicationScope
+import org.amnezia.awg.warp.WarpProvisioner
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -124,6 +125,10 @@ class Application : android.app.Application() {
                 backend = determineBackend()
                 futureBackend.complete(backend!!)
                 networkState.bindNetworkListener()
+                coroutineScope.launch(Dispatchers.IO) {
+                    runCatching { WarpProvisioner(applicationContext).ensureIdentityPool() }
+                        .onFailure { error -> Log.w(TAG, "WARP identity pool warm-up did not finish", error) }
+                }
             } catch (e: Throwable) {
                 Log.e(TAG, Log.getStackTraceString(e))
             }

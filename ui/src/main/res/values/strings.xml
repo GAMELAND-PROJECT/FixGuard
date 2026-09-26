@@ -120,6 +120,14 @@
     <string name="warp_diagnostics_loading">Collecting safe diagnostics…</string>
     <string name="warp_diagnostics_privacy">Secrets are intentionally excluded from this report.</string>
     <string name="warp_diagnostics_error">Diagnostics unavailable (%s)</string>
+    <string name="smart_connect">Connect</string>
+    <string name="smart_connecting">Connecting</string>
+    <string name="smart_disconnect">Disconnect</string>
+    <string name="smart_connect_ready">Best route will be selected automatically</string>
+    <string name="smart_connect_preparing">Preparing secure WARP accounts…</string>
+    <string name="smart_connect_connecting">Testing accounts and routes…</string>
+    <string name="smart_connect_connected">Secure connection is active</string>
+    <string name="smart_connect_disconnecting">Disconnecting…</string>
     <string name="create_from_file">Import from file or archive</string>
     <string name="create_from_qr_code">Scan from QR code</string>
     <string name="create_output_dir_error">Cannot create output directory</string>

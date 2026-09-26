@@ -263,4 +263,12 @@
     <string name="warp_diagnostics_loading">در حال جمع‌آوری اطلاعات امن…</string>
     <string name="warp_diagnostics_privacy">کلیدها، توکن‌ها، شناسه‌ها و آدرس‌های حساب عمداً از این گزارش حذف شده‌اند.</string>
     <string name="warp_diagnostics_error">عیب‌یابی در دسترس نیست (%s)</string>
+    <string name="smart_connect">اتصال</string>
+    <string name="smart_connecting">در حال اتصال</string>
+    <string name="smart_disconnect">قطع اتصال</string>
+    <string name="smart_connect_ready">بهترین مسیر به‌صورت خودکار انتخاب می‌شود</string>
+    <string name="smart_connect_preparing">در حال آماده‌سازی اکانت‌های امن WARP…</string>
+    <string name="smart_connect_connecting">در حال تست اکانت‌ها و مسیرها…</string>
+    <string name="smart_connect_connected">اتصال امن فعال است</string>
+    <string name="smart_connect_disconnecting">در حال قطع اتصال…</string>
 </resources>

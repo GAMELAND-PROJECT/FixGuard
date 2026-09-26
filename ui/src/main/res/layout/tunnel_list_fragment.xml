@@ -46,6 +46,66 @@
                 tools:text="در حال بررسی بهترین مسیر WARP…" />
         </com.google.android.material.card.MaterialCardView>
 
+        <LinearLayout
+            android:id="@+id/smart_connect_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingHorizontal="28dp"
+            android:paddingBottom="120dp">
+
+            <FrameLayout
+                android:layout_width="176dp"
+                android:layout_height="176dp"
+                android:clipChildren="false"
+                android:clipToPadding="false">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/smart_connect_progress"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:indeterminate="true"
+                    android:visibility="gone"
+                    app:indicatorColor="?attr/colorPrimary"
+                    app:indicatorInset="8dp"
+                    app:indicatorSize="160dp"
+                    app:trackColor="?attr/colorSurfaceVariant"
+                    app:trackThickness="5dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/smart_connect_button"
+                    android:layout_width="144dp"
+                    android:layout_height="144dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@string/smart_connect"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    android:text="@string/smart_connect"
+                    android:textAllCaps="false"
+                    android:textSize="18sp"
+                    app:cornerRadius="72dp"
+                    app:icon="@drawable/ic_action_generate"
+                    app:iconGravity="textTop"
+                    app:iconPadding="10dp"
+                    app:iconSize="28dp" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/smart_connect_caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:gravity="center"
+                android:maxLines="2"
+                android:text="@string/smart_connect_ready"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="?attr/colorOnSurfaceVariant" />
+        </LinearLayout>
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/tunnel_list"
             android:layout_width="match_parent"
@@ -54,7 +114,7 @@
             android:nextFocusDown="@id/create_fab"
             android:nextFocusForward="@id/create_fab"
             android:paddingBottom="@{@dimen/design_fab_size_normal * 1.1f}"
-            android:paddingTop="0dp"
+            android:paddingTop="380dp"
             android:visibility="@{tunnels.size() > 0 ? android.view.View.VISIBLE : android.view.View.GONE}"
             app:configurationHandler="@{rowConfigurationHandler}"
             app:items="@{tunnels}"
@@ -106,6 +166,7 @@
             android:layout_margin="@dimen/fab_margin"
             android:contentDescription="@string/warp_endpoint_optimize"
             android:text="@string/warp_endpoint_optimize"
+            android:visibility="gone"
             app:icon="@drawable/ic_action_generate" />
 
     </androidx.coordinatorlayout.widget.CoordinatorLayout>
