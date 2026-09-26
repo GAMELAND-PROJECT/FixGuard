@@ -19,6 +19,7 @@ import android.view.ViewGroup
 import android.view.animation.Animation
 import android.view.animation.AnimationUtils
 import android.view.animation.LinearInterpolator
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.addCallback
@@ -69,6 +70,8 @@ class TunnelListFragment : BaseFragment() {
     private var warpStageHideJob: Job? = null
     private var smartConnectJob: Job? = null
     private var smartConnectAnimator: ObjectAnimator? = null
+    private var smartConnectHaloAnimator: ObjectAnimator? = null
+    private var isSmartConnecting = false
     private var pendingSmartConnectTunnel: ObservableTunnel? = null
     private val warpVpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -175,6 +178,8 @@ class TunnelListFragment : BaseFragment() {
     }
 
     override fun onDestroyView() {
+        smartConnectHaloAnimator?.cancel()
+        smartConnectHaloAnimator = null
         smartConnectAnimator?.cancel()
         smartConnectAnimator = null
         binding = null
@@ -280,7 +285,8 @@ class TunnelListFragment : BaseFragment() {
         tunnel.name.startsWith(WARP_TUNNEL_PREFIX)
 
     private fun onSmartConnectClicked() {
-        if (smartConnectJob?.isActive == true) {
+        binding?.smartConnectButton?.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+        if (isSmartConnecting || smartConnectJob?.isActive == true) {
             showSnackbar(getString(R.string.smart_connect_busy))
             return
         }
@@ -289,7 +295,7 @@ class TunnelListFragment : BaseFragment() {
             val tunnels = manager.getTunnels()
             val active = tunnels.firstOrNull { it.state == Tunnel.State.UP }
             if (active != null) {
-                setSmartConnectBusy(true, getString(R.string.smart_connect_disconnecting))
+                setSmartConnectBusy(true, getString(R.string.smart_connect_disconnecting), showDotAsConnecting = true)
                 runCatching { active.setStateAsync(Tunnel.State.DOWN) }
                     .onFailure { error -> showSnackbar(getString(R.string.error_down, ErrorMessages[error])) }
                 setSmartConnectBusy(false)
@@ -299,7 +305,7 @@ class TunnelListFragment : BaseFragment() {
 
             val reusable = tunnels.firstOrNull { isWarpProfile(it) }
             if (reusable == null) {
-                setSmartConnectBusy(true, getString(R.string.smart_connect_preparing))
+                setSmartConnectBusy(true, getString(R.string.smart_connect_preparing), showDotAsConnecting = true)
                 prepareVerifiedWarpProfile()
                 return@launch
             }
@@ -315,32 +321,35 @@ class TunnelListFragment : BaseFragment() {
                 }
                 connectReusableWarpTunnel(reusable)
             } finally {
+                setSmartConnectBusy(false)
                 refreshSmartConnectUi()
             }
         }
     }
 
     private suspend fun connectReusableWarpTunnel(tunnel: ObservableTunnel) {
-        setSmartConnectBusy(true, getString(R.string.smart_connect_connecting))
+        setSmartConnectBusy(true, getString(R.string.smart_connect_connecting), showDotAsConnecting = true)
         updateWarpStage(getString(R.string.warp_stage_preparing))
         runCatching { tunnel.setStateAsync(Tunnel.State.UP) }
             .onSuccess {
                 selectedTunnel = tunnel
                 setSmartConnectBusy(false)
                 updateWarpStage(getString(R.string.smart_connect_connected), autoHide = true)
+                refreshSmartConnectUi()
             }
             .onFailure { error ->
                 setSmartConnectBusy(false)
                 updateWarpStage(getString(R.string.warp_stage_failed, ErrorMessages[error]), autoHide = true)
                 showSnackbar(getString(R.string.error_up, ErrorMessages[error]))
+                refreshSmartConnectUi()
             }
     }
 
     private fun refreshSmartConnectUi() {
         val currentBinding = binding ?: return
         viewLifecycleOwner.lifecycleScope.launch {
+            if (isSmartConnecting) return@launch
             val active = Application.getTunnelManager().getTunnels().firstOrNull { it.state == Tunnel.State.UP }
-            if (smartConnectJob?.isActive == true) return@launch
             if (active != null) {
                 currentBinding.smartConnectButton.setText(R.string.smart_disconnect)
                 currentBinding.smartConnectCaption.setText(R.string.smart_connect_connected)
@@ -348,7 +357,7 @@ class TunnelListFragment : BaseFragment() {
                 currentBinding.smartConnectButton.iconTint = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
                 currentBinding.statusDot.setBackgroundResource(R.drawable.bg_status_dot_connected)
                 currentBinding.statusPillText.setText(R.string.smart_status_connected)
-                currentBinding.smartConnectHalo.animate().alpha(0.35f).setDuration(400L).start()
+                startSmartConnectHaloPulse()
             } else {
                 currentBinding.smartConnectButton.setText(R.string.smart_connect)
                 currentBinding.smartConnectCaption.setText(R.string.smart_connect_ready)
@@ -356,7 +365,8 @@ class TunnelListFragment : BaseFragment() {
                 currentBinding.smartConnectButton.iconTint = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
                 currentBinding.statusDot.setBackgroundResource(R.drawable.bg_status_dot_disconnected)
                 currentBinding.statusPillText.setText(R.string.smart_status_disconnected)
-                currentBinding.smartConnectHalo.animate().alpha(0.18f).setDuration(400L).start()
+                stopSmartConnectHaloPulse()
+                currentBinding.smartConnectHalo.animate().alpha(0.18f).setDuration(250L).start()
             }
             currentBinding.smartConnectProgress.visibility = View.GONE
             // CRITICAL: Re-bind click listener to recover from cases where the button lost its handler
@@ -366,20 +376,43 @@ class TunnelListFragment : BaseFragment() {
         }
     }
 
-    private fun setSmartConnectBusy(busy: Boolean, caption: CharSequence? = null) {
+    private fun setSmartConnectBusy(busy: Boolean, caption: CharSequence? = null, showDotAsConnecting: Boolean = true) {
+        isSmartConnecting = busy
         binding?.apply {
             smartConnectButton.isEnabled = !busy
             smartConnectButton.setText(if (busy) R.string.smart_connecting else R.string.smart_connect)
             caption?.let { smartConnectCaption.text = it }
-            smartConnectProgress.visibility = if (busy) View.VISIBLE else View.GONE
             if (busy) {
-                statusDot.setBackgroundResource(R.drawable.bg_status_dot_disconnected)
-                statusPillText.setText(R.string.smart_connecting)
+                if (showDotAsConnecting) {
+                    statusDot.setBackgroundResource(R.drawable.bg_status_dot_connecting)
+                    statusPillText.setText(R.string.smart_connecting)
+                }
+                smartConnectProgress.visibility = View.VISIBLE
                 startSmartConnectAnimation()
+                stopSmartConnectHaloPulse()
+                smartConnectHalo.animate().alpha(0.28f).setDuration(200L).start()
             } else {
+                smartConnectProgress.visibility = View.GONE
                 stopSmartConnectAnimation()
             }
         }
+    }
+
+    private fun startSmartConnectHaloPulse() {
+        val halo = binding?.smartConnectHalo ?: return
+        if (smartConnectHaloAnimator?.isStarted == true) return
+        smartConnectHaloAnimator = ObjectAnimator.ofFloat(halo, View.ALPHA, 0.18f, 0.45f).apply {
+            duration = 1_400L
+            repeatMode = ObjectAnimator.REVERSE
+            repeatCount = ObjectAnimator.INFINITE
+            interpolator = AccelerateDecelerateInterpolator()
+            start()
+        }
+    }
+
+    private fun stopSmartConnectHaloPulse() {
+        smartConnectHaloAnimator?.cancel()
+        smartConnectHaloAnimator = null
     }
 
     private fun startSmartConnectAnimation() {
@@ -440,6 +473,7 @@ class TunnelListFragment : BaseFragment() {
     private fun createAndVerifyWarpProfile() {
         val currentBinding = binding ?: return
         currentBinding.optimizeWarpFab.isEnabled = false
+        setSmartConnectBusy(true, getString(R.string.smart_connect_connecting))
         updateWarpStage(getString(R.string.warp_stage_preparing))
         showSnackbar(getString(R.string.warp_verified_testing))
         viewLifecycleOwner.lifecycleScope.launch {
@@ -466,12 +500,14 @@ class TunnelListFragment : BaseFragment() {
 
                         val verifiedRoutes = mutableListOf<VerifiedWarpRoute>()
                         for ((index, candidate) in candidates.withIndex()) {
-                            updateWarpStage(getString(
+                            val scanningText = getString(
                                 R.string.warp_stage_scanning,
                                 index + 1,
                                 candidates.size,
                                 candidate.endpoint.authority,
-                            ))
+                            )
+                            updateWarpStage(scanningText)
+                            currentBinding.smartConnectCaption.text = scanningText
                             Log.i(TAG, "Testing WARP candidate ${index + 1}/${candidates.size}: ${candidate.endpoint.authority}")
                             if (index > 0) tunnel.setConfigAsync(candidate.config)
                             val attemptStartedAt = System.currentTimeMillis() / 1000L - 1L
@@ -540,9 +576,8 @@ class TunnelListFragment : BaseFragment() {
                     }.onSuccess { (tunnel, endpoint) ->
                         // Keep WARP profiles hidden — don't navigate to TunnelDetailFragment
                         // Just update the smart connect button state and show success
-                        viewLifecycleOwner.lifecycleScope.launch {
-                            refreshSmartConnectUi()
-                        }
+                        setSmartConnectBusy(false)
+                        refreshSmartConnectUi()
                         updateWarpStage(
                             getString(R.string.warp_stage_connected, endpoint.authority),
                             autoHide = true,
@@ -550,6 +585,8 @@ class TunnelListFragment : BaseFragment() {
                         showSnackbar(getString(R.string.warp_verified_connected, tunnel.name, endpoint.authority))
                     }.onFailure { error ->
                         Log.e(TAG, "Verified WARP profile creation failed", error)
+                        setSmartConnectBusy(false)
+                        refreshSmartConnectUi()
                         createdTunnel?.let { tunnel ->
                             runCatching {
                                 if (tunnel.state == Tunnel.State.UP) tunnel.setStateAsync(Tunnel.State.DOWN)
