@@ -10,7 +10,7 @@ object WarpProfileGenerator {
     fun generate(
         identity: WarpIdentity,
         endpointOverride: String? = null,
-        policy: WarpTunnelPolicy = WarpTunnelPolicy(1280, 25),
+        policy: WarpTunnelPolicy = WarpTunnelPolicy(1280, 12),
     ): Config {
         // Endpoint discovery always supplies a numeric address. Keep the defensive fallback
         // numeric too, so this generator can never silently reintroduce DNS into a tunnel.

@@ -17,12 +17,12 @@ class WarpTunnelPolicyResolver(context: Context) {
             ?.takeIf { !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) }
         return when {
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true ->
-                WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 15)
+                WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 12)
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true ->
-                WarpTunnelPolicy(mtu = 1360, keepaliveSeconds = 25)
+                WarpTunnelPolicy(mtu = 1360, keepaliveSeconds = 20)
             capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true ->
-                WarpTunnelPolicy(mtu = 1320, keepaliveSeconds = 20)
-            else -> WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 18)
+                WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 15)
+            else -> WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 12)
         }
     }
 }

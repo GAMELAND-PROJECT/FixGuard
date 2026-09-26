@@ -137,41 +137,43 @@ class TunnelHealthMonitor(
     private fun hasPhysicalInternet(): Boolean = connectivityManager.allNetworks.any { network ->
         val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return@any false
         !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     private suspend fun probeTunnel(): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            val connection = URL(PROBE_URL).openConnection() as HttpURLConnection
-            try {
-                connection.connectTimeout = PROBE_TIMEOUT_MS
-                connection.readTimeout = PROBE_TIMEOUT_MS
-                connection.instanceFollowRedirects = false
-                connection.useCaches = false
-                connection.setRequestProperty("Connection", "close")
-                connection.inputStream.use { it.read() }
-                connection.responseCode in 200..399
-            } finally {
-                connection.disconnect()
-            }
-        }.getOrDefault(false)
+        probeUrl(PROBE_URL) || probeUrl(PROBE_FALLBACK_URL)
     }
+
+    private fun probeUrl(urlString: String): Boolean = runCatching {
+        val connection = URL(urlString).openConnection() as HttpURLConnection
+        try {
+            connection.connectTimeout = PROBE_TIMEOUT_MS
+            connection.readTimeout = PROBE_TIMEOUT_MS
+            connection.instanceFollowRedirects = false
+            connection.useCaches = false
+            connection.setRequestProperty("Connection", "close")
+            connection.setRequestProperty("User-Agent", "okhttp/3.12.1")
+            connection.responseCode in 200..399
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrDefault(false)
 
     private companion object {
         const val TAG = "FixGuard/TunnelHealth"
         const val PROBE_URL = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
-        const val POLL_INTERVAL_MS = 15_000L
-        const val POWER_SAVE_POLL_INTERVAL_MS = 60_000L
-        const val PROBE_INTERVAL_MS = 30_000L
-        const val PROBE_TIMEOUT_MS = 6_000
-        const val UNANSWERED_TRAFFIC_MS = 30_000L
+        const val PROBE_FALLBACK_URL = "https://1.1.1.1/cdn-cgi/trace"
+        const val POLL_INTERVAL_MS = 10_000L
+        const val POWER_SAVE_POLL_INTERVAL_MS = 45_000L
+        const val PROBE_INTERVAL_MS = 20_000L
+        const val PROBE_TIMEOUT_MS = 3_500
+        const val UNANSWERED_TRAFFIC_MS = 20_000L
         const val MEANINGFUL_TX_BYTES = 512L
-        const val STALE_HANDSHAKE_SECONDS = 180L
-        const val INITIAL_HANDSHAKE_TIMEOUT_MS = 30_000L
+        const val STALE_HANDSHAKE_SECONDS = 135L
+        const val INITIAL_HANDSHAKE_TIMEOUT_MS = 25_000L
         const val REQUIRED_FAILURES = 2
-        const val RECOVERY_COOLDOWN_MS = 60_000L
+        const val RECOVERY_COOLDOWN_MS = 45_000L
         const val RECOVERY_WINDOW_MS = 10 * 60_000L
-        const val MAX_RECOVERIES_PER_WINDOW = 3
+        const val MAX_RECOVERIES_PER_WINDOW = 4
     }
 }
