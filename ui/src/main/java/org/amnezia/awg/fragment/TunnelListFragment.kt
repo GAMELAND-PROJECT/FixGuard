@@ -245,6 +245,19 @@ class TunnelListFragment : BaseFragment() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshSmartConnectUi()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val allTunnels = Application.getTunnelManager().getTunnels()
+            val filtered = ObservableSortedKeyedArrayList<String, ObservableTunnel>(TunnelComparator)
+            for (t in allTunnels) {
+                if (!isWarpProfile(t)) filtered.add(t)
+            }
+            binding?.tunnels = filtered
+        }
+    }
+
     private fun showSnackbar(message: CharSequence) {
         val binding = binding
         if (binding != null)
@@ -333,11 +346,17 @@ class TunnelListFragment : BaseFragment() {
                 currentBinding.smartConnectCaption.setText(R.string.smart_connect_connected)
                 currentBinding.smartConnectButton.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFD32F2F.toInt())
                 currentBinding.smartConnectButton.iconTint = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
+                currentBinding.statusDot.setBackgroundResource(R.drawable.bg_status_dot_connected)
+                currentBinding.statusPillText.setText(R.string.smart_status_connected)
+                currentBinding.smartConnectHalo.animate().alpha(0.35f).setDuration(400L).start()
             } else {
                 currentBinding.smartConnectButton.setText(R.string.smart_connect)
                 currentBinding.smartConnectCaption.setText(R.string.smart_connect_ready)
                 currentBinding.smartConnectButton.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF1F6FEB.toInt())
                 currentBinding.smartConnectButton.iconTint = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
+                currentBinding.statusDot.setBackgroundResource(R.drawable.bg_status_dot_disconnected)
+                currentBinding.statusPillText.setText(R.string.smart_status_disconnected)
+                currentBinding.smartConnectHalo.animate().alpha(0.18f).setDuration(400L).start()
             }
             currentBinding.smartConnectProgress.visibility = View.GONE
             // CRITICAL: Re-bind click listener to recover from cases where the button lost its handler
@@ -353,7 +372,13 @@ class TunnelListFragment : BaseFragment() {
             smartConnectButton.setText(if (busy) R.string.smart_connecting else R.string.smart_connect)
             caption?.let { smartConnectCaption.text = it }
             smartConnectProgress.visibility = if (busy) View.VISIBLE else View.GONE
-            if (busy) startSmartConnectAnimation() else stopSmartConnectAnimation()
+            if (busy) {
+                statusDot.setBackgroundResource(R.drawable.bg_status_dot_disconnected)
+                statusPillText.setText(R.string.smart_connecting)
+                startSmartConnectAnimation()
+            } else {
+                stopSmartConnectAnimation()
+            }
         }
     }
 
@@ -611,26 +636,29 @@ class TunnelListFragment : BaseFragment() {
     }
 
     private suspend fun probeWarpDataPath(): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            val connection = URL(WARP_TRACE_URL).openConnection() as HttpURLConnection
-            try {
-                connection.connectTimeout = DATA_PATH_TIMEOUT_MS
-                connection.readTimeout = DATA_PATH_TIMEOUT_MS
-                connection.instanceFollowRedirects = false
-                connection.useCaches = false
-                connection.setRequestProperty("Connection", "close")
-                if (connection.responseCode !in 200..299) return@runCatching false
-                connection.inputStream.bufferedReader().use { reader ->
-                    reader.lineSequence().any { line ->
-                        line.equals("warp=on", ignoreCase = true) ||
-                            line.equals("warp=plus", ignoreCase = true)
-                    }
-                }
-            } finally {
-                connection.disconnect()
-            }
-        }.getOrDefault(false)
+        probeTraceUrl(WARP_TRACE_URL) || probeTraceUrl(WARP_TRACE_FALLBACK_URL)
     }
+
+    private fun probeTraceUrl(urlString: String): Boolean = runCatching {
+        val connection = URL(urlString).openConnection() as HttpURLConnection
+        try {
+            connection.connectTimeout = DATA_PATH_TIMEOUT_MS
+            connection.readTimeout = DATA_PATH_TIMEOUT_MS
+            connection.instanceFollowRedirects = false
+            connection.useCaches = false
+            connection.setRequestProperty("Connection", "close")
+            connection.setRequestProperty("User-Agent", "okhttp/3.12.1")
+            if (connection.responseCode !in 200..299) return@runCatching false
+            connection.inputStream.bufferedReader().use { reader ->
+                reader.lineSequence().any { line ->
+                    line.equals("warp=on", ignoreCase = true) ||
+                        line.equals("warp=plus", ignoreCase = true)
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrDefault(false)
 
     private fun viewForTunnel(tunnel: ObservableTunnel, tunnels: List<*>): MultiselectableRelativeLayout? {
         return binding?.tunnelList?.findViewHolderForAdapterPosition(tunnels.indexOf(tunnel))?.itemView as? MultiselectableRelativeLayout
@@ -779,6 +807,7 @@ class TunnelListFragment : BaseFragment() {
         private const val VERIFIED_ROUTES_TO_COMPARE = 2
         private const val MAX_DISCOVERY_ATTEMPTS = 4
         private const val WARP_TRACE_URL = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
+        private const val WARP_TRACE_FALLBACK_URL = "https://1.1.1.1/cdn-cgi/trace"
         private const val DATA_PATH_TIMEOUT_MS = 6_000
         private const val DATA_PATH_SETTLE_MS = 500L
         private const val STAGE_TERMINAL_VISIBILITY_MS = 6_000L

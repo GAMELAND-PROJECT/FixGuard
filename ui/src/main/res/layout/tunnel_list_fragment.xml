@@ -86,7 +86,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.08"
-                    android:text="@string/smart_disconnect"
+                    android:text="@string/smart_status_disconnected"
                     android:textAllCaps="true"
                     android:textColor="?attr/colorOnSurfaceVariant"
                     android:textSize="12sp"

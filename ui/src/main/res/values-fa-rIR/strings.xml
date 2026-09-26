@@ -270,5 +270,8 @@
     <string name="smart_connect_preparing">در حال آماده‌سازی اکانت‌های امن WARP…</string>
     <string name="smart_connect_connecting">در حال تست اکانت‌ها و مسیرها…</string>
     <string name="smart_connect_connected">اتصال امن فعال است</string>
+    <string name="smart_connect_busy">سیستم در حال برقراری اتصال است — لطفاً شکیبا باشید</string>
     <string name="smart_connect_disconnecting">در حال قطع اتصال…</string>
+    <string name="smart_status_disconnected">قطع</string>
+    <string name="smart_status_connected">متصل</string>
 </resources>

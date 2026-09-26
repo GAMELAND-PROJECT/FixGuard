@@ -213,7 +213,7 @@ class WarpEndpointScanner(context: Context) {
         val WARP_PORTS = listOf(2408, 500, 1701, 4500)
         val WARP_IPV4_PREFIXES = listOf(
             // Official consumer/Cloudflare One WireGuard ingress seeds.
-            "162.159.192", "162.159.193",
+            "162.159.192", "162.159.193", "162.159.195", "162.159.204",
             // Community-observed consumer anycast pools. They never become trusted until an
             // authenticated handshake and routed-data verification succeed on this device.
             "188.114.96", "188.114.97", "188.114.98", "188.114.99",
