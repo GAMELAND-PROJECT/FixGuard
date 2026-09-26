@@ -434,8 +434,12 @@ public final class GoBackend implements Backend {
             currentTunnel = tunnel;
             currentConfig = config;
 
-            service.protect(awgGetSocketV4(currentTunnelHandle));
-            service.protect(awgGetSocketV6(currentTunnelHandle));
+            final int sockV4 = awgGetSocketV4(currentTunnelHandle);
+            final int sockV6 = awgGetSocketV6(currentTunnelHandle);
+            service.protect(sockV4);
+            service.protect(sockV6);
+            tuneSocketBuffers(sockV4);
+            tuneSocketBuffers(sockV6);
 
             launchStatusJob();
         } else {
@@ -455,6 +459,21 @@ public final class GoBackend implements Backend {
         }
 
         tunnel.onStateChange(state);
+    }
+
+    private void tuneSocketBuffers(final int fd) {
+        if (fd <= 0) return;
+        try {
+            final java.io.FileDescriptor fileDescriptor = new java.io.FileDescriptor();
+            final java.lang.reflect.Field field = java.io.FileDescriptor.class.getDeclaredField("descriptor");
+            field.setAccessible(true);
+            field.setInt(fileDescriptor, fd);
+            android.system.Os.setsockoptInt(fileDescriptor, OsConstants.SOL_SOCKET, OsConstants.SO_RCVBUF, 2 * 1024 * 1024);
+            android.system.Os.setsockoptInt(fileDescriptor, OsConstants.SOL_SOCKET, OsConstants.SO_SNDBUF, 2 * 1024 * 1024);
+            Log.d(TAG, "Tuned socket buffers to 2MB for fd " + fd);
+        } catch (final Throwable t) {
+            Log.w(TAG, "Socket buffer tuning fallback: " + t.getMessage());
+        }
     }
 
     /**

@@ -209,8 +209,13 @@ class WarpEndpointScanner(context: Context) {
         const val FALLBACK_HOST_COUNT = 2
 
         // Official Cloudflare WireGuard/WARP ports: UDP 2408 is the default and the remaining
-        // values are documented fallbacks. Never persist an arbitrary port in a WARP profile.
-        val WARP_PORTS = listOf(2408, 500, 1701, 4500)
+        // values are documented edge ports that bypass port-based traffic shaping in Iran.
+        val WARP_PORTS = listOf(
+            2408, 500, 1701, 4500,
+            854, 859, 864, 878, 880, 890, 891, 894, 903, 908, 928, 934,
+            939, 942, 943, 945, 946, 955, 968, 987, 988, 1002, 1010, 1014,
+            1018, 1070, 1074, 1180, 1387, 1743, 4088, 8443,
+        )
         val WARP_IPV4_PREFIXES = listOf(
             // Official consumer/Cloudflare One WireGuard ingress seeds.
             "162.159.192", "162.159.193", "162.159.195", "162.159.204",

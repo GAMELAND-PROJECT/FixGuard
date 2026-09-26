@@ -28,6 +28,9 @@ class TunnelHealthMonitor(
     private val connectivityManager = context.applicationContext
         .getSystemService(ConnectivityManager::class.java)
     private val powerManager = context.applicationContext.getSystemService(PowerManager::class.java)
+    private val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FixGuard:HealthProbe")?.apply {
+        setReferenceCounted(false)
+    }
     private val diagnostics = ConnectionHealthStore(context.applicationContext)
     private var job: Job? = null
 
@@ -48,7 +51,7 @@ class TunnelHealthMonitor(
         val recoveryHistory = ArrayDeque<Long>()
 
         while (currentCoroutineContext().isActive) {
-            delay(if (powerManager.isPowerSaveMode) POWER_SAVE_POLL_INTERVAL_MS else POLL_INTERVAL_MS)
+            delay(if (powerManager?.isPowerSaveMode == true) POWER_SAVE_POLL_INTERVAL_MS else POLL_INTERVAL_MS)
             val tunnel = withContext(Dispatchers.Main.immediate) {
                 activeTunnel()?.takeIf { it.state == Tunnel.State.UP }
             }
@@ -141,7 +144,14 @@ class TunnelHealthMonitor(
     }
 
     private suspend fun probeTunnel(): Boolean = withContext(Dispatchers.IO) {
-        probeUrl(PROBE_URL) || probeUrl(PROBE_FALLBACK_URL)
+        try {
+            wakeLock?.acquire(4_000L)
+            probeUrl(PROBE_URL) || probeUrl(PROBE_FALLBACK_URL)
+        } finally {
+            if (wakeLock?.isHeld == true) {
+                runCatching { wakeLock.release() }
+            }
+        }
     }
 
     private fun probeUrl(urlString: String): Boolean = runCatching {

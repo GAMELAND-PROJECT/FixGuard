@@ -144,7 +144,7 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
             val activation = withContext(Dispatchers.IO) {
                 val backend = getBackend()
                 backend.setState(tunnel, Tunnel.State.DOWN, null)
-                delay(750L)
+                delay(250L)
                 try {
                     if (awgRecovery.isManagedConfig(recoveryConfig)) {
                         activateManagedWarp(tunnel, recoveryConfig)
@@ -192,7 +192,7 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
             val activation = withContext(Dispatchers.IO) {
                 val backend = getBackend()
                 backend.setState(tunnel, Tunnel.State.DOWN, null)
-                delay(750L)
+                delay(250L)
                 if (awgRecovery.isManagedConfig(selectedConfig)) {
                     activateManagedWarp(tunnel, selectedConfig)
                 } else {
