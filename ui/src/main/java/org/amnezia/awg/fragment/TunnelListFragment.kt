@@ -4,22 +4,30 @@
  */
 package org.amnezia.awg.fragment
 
+import android.animation.AnimatorSet
+import android.animation.ArgbEvaluator
 import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.app.Activity
+import android.content.res.ColorStateList
 import android.content.res.Resources
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
+import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.Animation
 import android.view.animation.AnimationUtils
 import android.view.animation.LinearInterpolator
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.addCallback
@@ -71,7 +79,10 @@ class TunnelListFragment : BaseFragment() {
     private var warpStageHideJob: Job? = null
     private var smartConnectJob: Job? = null
     private var smartConnectAnimator: ObjectAnimator? = null
-    private var smartConnectHaloAnimator: ObjectAnimator? = null
+    private var smartConnectHaloAnimator: AnimatorSet? = null
+    private var smartConnectHaloPulseAnimator: AnimatorSet? = null
+    private var buttonColorAnimator: ValueAnimator? = null
+    private var lastButtonColor: Int = 0xFF1F6FEB.toInt()
     private var isSmartConnecting = false
     private var pendingSmartConnectTunnel: ObservableTunnel? = null
 
@@ -146,6 +157,8 @@ class TunnelListFragment : BaseFragment() {
         binding = TunnelListFragmentBinding.inflate(inflater, container, false)
         val bottomSheet = AddTunnelsSheet()
         binding?.apply {
+            setupVipCard()
+            setupButtonSpringPhysics()
             smartConnectButton.setOnClickListener { onSmartConnectClicked() }
             optimizeWarpFab.setOnClickListener { prepareVerifiedWarpProfile() }
             createFab.setOnClickListener {
@@ -188,10 +201,10 @@ class TunnelListFragment : BaseFragment() {
     override fun onDestroyView() {
         smartConnectJob?.cancel()
         warpStageHideJob?.cancel()
-        smartConnectHaloAnimator?.cancel()
-        smartConnectHaloAnimator = null
-        smartConnectAnimator?.cancel()
-        smartConnectAnimator = null
+        stopSmartConnectHaloPulse()
+        stopSmartConnectAnimation()
+        buttonColorAnimator?.cancel()
+        buttonColorAnimator = null
         binding = null
         super.onDestroyView()
     }
@@ -356,28 +369,101 @@ class TunnelListFragment : BaseFragment() {
             }
     }
 
+    private fun animateButtonColor(targetColor: Int) {
+        val button = binding?.smartConnectButton ?: return
+        if (lastButtonColor == targetColor) return
+        buttonColorAnimator?.cancel()
+        val startColor = lastButtonColor
+        buttonColorAnimator = ValueAnimator.ofObject(ArgbEvaluator(), startColor, targetColor).apply {
+            duration = 420L
+            addUpdateListener { animator ->
+                val c = animator.animatedValue as Int
+                button.backgroundTintList = ColorStateList.valueOf(c)
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    lastButtonColor = targetColor
+                }
+            })
+            start()
+        }
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun setupButtonSpringPhysics() {
+        val button = binding?.smartConnectButton ?: return
+        button.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.animate()
+                        .scaleX(0.92f)
+                        .scaleY(0.92f)
+                        .setDuration(120L)
+                        .setInterpolator(DecelerateInterpolator())
+                        .start()
+                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.animate()
+                        .scaleX(1.0f)
+                        .scaleY(1.0f)
+                        .setDuration(320L)
+                        .setInterpolator(OvershootInterpolator(2.5f))
+                        .start()
+                }
+            }
+            false
+        }
+    }
+
+    private fun setupVipCard() {
+        val card = binding?.vipProfileCard ?: return
+        card.alpha = 0f
+        card.translationY = -60f
+        card.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(550L)
+            .setInterpolator(DecelerateInterpolator(1.8f))
+            .start()
+
+        card.setOnClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            showSnackbar("حساب کاربری ZUN VIP شما فعال و متصل به شبکه پرسرعت است")
+        }
+    }
+
     private fun refreshSmartConnectUi() {
         val currentBinding = binding ?: return
         safeViewScope {
             if (isSmartConnecting) return@safeViewScope
             val active = Application.getTunnelManager().getTunnels().firstOrNull { it.state == Tunnel.State.UP }
             if (active != null) {
-                currentBinding.smartConnectButton.setText(R.string.smart_disconnect)
-                currentBinding.smartConnectCaption.setText(R.string.smart_connect_connected)
-                currentBinding.smartConnectButton.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFD32F2F.toInt())
-                currentBinding.smartConnectButton.iconTint = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
+                currentBinding.smartConnectButton.setIconResource(R.drawable.ic_vpn_power)
+                currentBinding.smartConnectButton.text = ""
+                currentBinding.smartConnectButton.contentDescription = getString(R.string.smart_disconnect)
+                currentBinding.telemetryCaption.text = "اتصال پایدار و اختصاصی ZUN برقرار است"
+                currentBinding.telemetryLiveRow.visibility = View.VISIBLE
+                animateButtonColor(0xFFDC2626.toInt())
+                currentBinding.smartConnectButton.iconTint = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+                currentBinding.statusPill.setBackgroundResource(R.drawable.bg_status_pill_connected)
                 currentBinding.statusDot.setBackgroundResource(R.drawable.bg_status_dot_connected)
                 currentBinding.statusPillText.setText(R.string.smart_status_connected)
+                currentBinding.statusPillText.setTextColor(0xFF3FB950.toInt())
                 startSmartConnectHaloPulse()
             } else {
-                currentBinding.smartConnectButton.setText(R.string.smart_connect)
-                currentBinding.smartConnectCaption.setText(R.string.smart_connect_ready)
-                currentBinding.smartConnectButton.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF1F6FEB.toInt())
-                currentBinding.smartConnectButton.iconTint = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
+                currentBinding.smartConnectButton.setIconResource(R.drawable.ic_vpn_power)
+                currentBinding.smartConnectButton.text = ""
+                currentBinding.smartConnectButton.contentDescription = getString(R.string.smart_connect)
+                currentBinding.telemetryCaption.setText(R.string.smart_connect_ready)
+                currentBinding.telemetryLiveRow.visibility = View.GONE
+                animateButtonColor(0xFF1F6FEB.toInt())
+                currentBinding.smartConnectButton.iconTint = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+                currentBinding.statusPill.setBackgroundResource(R.drawable.bg_status_pill)
                 currentBinding.statusDot.setBackgroundResource(R.drawable.bg_status_dot_disconnected)
                 currentBinding.statusPillText.setText(R.string.smart_status_disconnected)
+                currentBinding.statusPillText.setTextColor(0xFFE6EDF3.toInt())
                 stopSmartConnectHaloPulse()
-                currentBinding.smartConnectHalo.animate().alpha(0.18f).setDuration(250L).start()
             }
             currentBinding.smartConnectProgress.visibility = View.GONE
             // CRITICAL: Re-bind click listener to recover from cases where the button lost its handler
@@ -391,13 +477,21 @@ class TunnelListFragment : BaseFragment() {
         isSmartConnecting = busy
         binding?.apply {
             smartConnectButton.isEnabled = !busy
-            smartConnectButton.setText(if (busy) R.string.smart_connecting else R.string.smart_connect)
-            caption?.let { smartConnectCaption.text = it }
+            smartConnectButton.setIconResource(R.drawable.ic_vpn_power)
+            smartConnectButton.text = ""
+            smartConnectButton.contentDescription = getString(if (busy) R.string.smart_connecting else R.string.smart_connect)
+            caption?.let { telemetryCaption.text = it } ?: run {
+                telemetryCaption.setText(if (busy) R.string.smart_connecting else R.string.smart_connect_ready)
+            }
             if (busy) {
+                telemetryLiveRow.visibility = View.GONE
                 if (showDotAsConnecting) {
+                    statusPill.setBackgroundResource(R.drawable.bg_status_pill_connecting)
                     statusDot.setBackgroundResource(R.drawable.bg_status_dot_connecting)
                     statusPillText.setText(R.string.smart_connecting)
+                    statusPillText.setTextColor(0xFFF59E0B.toInt())
                 }
+                animateButtonColor(0xFFD97706.toInt())
                 smartConnectProgress.visibility = View.VISIBLE
                 startSmartConnectAnimation()
                 stopSmartConnectHaloPulse()
@@ -411,12 +505,50 @@ class TunnelListFragment : BaseFragment() {
 
     private fun startSmartConnectHaloPulse() {
         val halo = binding?.smartConnectHalo ?: return
-        if (smartConnectHaloAnimator?.isStarted == true) return
-        smartConnectHaloAnimator = ObjectAnimator.ofFloat(halo, View.ALPHA, 0.18f, 0.45f).apply {
-            duration = 1_400L
-            repeatMode = ObjectAnimator.REVERSE
-            repeatCount = ObjectAnimator.INFINITE
+        val pulse = binding?.smartConnectHaloPulse ?: return
+        if (smartConnectHaloAnimator != null) return
+
+        // 1. Inner breathing halo (subtle glow expansion)
+        val alphaAnim = ObjectAnimator.ofFloat(halo, View.ALPHA, 0.18f, 0.48f)
+        val scaleXAnim = ObjectAnimator.ofFloat(halo, View.SCALE_X, 1.0f, 1.08f)
+        val scaleYAnim = ObjectAnimator.ofFloat(halo, View.SCALE_Y, 1.0f, 1.08f)
+        smartConnectHaloAnimator = AnimatorSet().apply {
+            playTogether(alphaAnim, scaleXAnim, scaleYAnim)
+            duration = 1_800L
             interpolator = AccelerateDecelerateInterpolator()
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                var isReverse = false
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (binding?.smartConnectHalo != null && smartConnectHaloAnimator != null) {
+                        isReverse = !isReverse
+                        alphaAnim.setFloatValues(if (isReverse) 0.48f else 0.18f, if (isReverse) 0.18f else 0.48f)
+                        scaleXAnim.setFloatValues(if (isReverse) 1.08f else 1.0f, if (isReverse) 1.0f else 1.08f)
+                        scaleYAnim.setFloatValues(if (isReverse) 1.08f else 1.0f, if (isReverse) 1.0f else 1.08f)
+                        start()
+                    }
+                }
+            })
+            start()
+        }
+
+        // 2. Outer radar wave pulse
+        pulse.visibility = View.VISIBLE
+        val pulseAlpha = ObjectAnimator.ofFloat(pulse, View.ALPHA, 0.38f, 0.0f).apply {
+            repeatCount = ObjectAnimator.INFINITE
+            repeatMode = ObjectAnimator.RESTART
+        }
+        val pulseScaleX = ObjectAnimator.ofFloat(pulse, View.SCALE_X, 1.0f, 1.34f).apply {
+            repeatCount = ObjectAnimator.INFINITE
+            repeatMode = ObjectAnimator.RESTART
+        }
+        val pulseScaleY = ObjectAnimator.ofFloat(pulse, View.SCALE_Y, 1.0f, 1.34f).apply {
+            repeatCount = ObjectAnimator.INFINITE
+            repeatMode = ObjectAnimator.RESTART
+        }
+        smartConnectHaloPulseAnimator = AnimatorSet().apply {
+            playTogether(pulseAlpha, pulseScaleX, pulseScaleY)
+            duration = 2_000L
+            interpolator = DecelerateInterpolator()
             start()
         }
     }
@@ -424,6 +556,18 @@ class TunnelListFragment : BaseFragment() {
     private fun stopSmartConnectHaloPulse() {
         smartConnectHaloAnimator?.cancel()
         smartConnectHaloAnimator = null
+        smartConnectHaloPulseAnimator?.cancel()
+        smartConnectHaloPulseAnimator = null
+        binding?.smartConnectHalo?.apply {
+            scaleX = 1.0f
+            scaleY = 1.0f
+            alpha = 0.18f
+        }
+        binding?.smartConnectHaloPulse?.apply {
+            scaleX = 1.0f
+            scaleY = 1.0f
+            alpha = 0.0f
+        }
     }
 
     private fun startSmartConnectAnimation() {
@@ -518,7 +662,7 @@ class TunnelListFragment : BaseFragment() {
                                 candidate.endpoint.authority,
                             )
                             updateWarpStage(scanningText)
-                            currentBinding.smartConnectCaption.text = scanningText
+                            currentBinding.telemetryCaption.text = scanningText
                             Log.i(TAG, "Testing WARP candidate ${index + 1}/${candidates.size}: ${candidate.endpoint.authority}")
                             if (index > 0) tunnel.setConfigAsync(candidate.config)
                             val attemptStartedAt = System.currentTimeMillis() / 1000L - 1L
@@ -629,27 +773,31 @@ class TunnelListFragment : BaseFragment() {
     private fun updateWarpStage(message: CharSequence, autoHide: Boolean = false) {
         warpStageHideJob?.cancel()
         binding?.apply {
-            warpStatusCard.visibility = View.VISIBLE
-            warpStatusText.text = message
-            val stageInset = (76 * resources.displayMetrics.density).toInt()
-            tunnelList.setPadding(
-                tunnelList.paddingLeft,
-                stageInset,
-                tunnelList.paddingRight,
-                tunnelList.paddingBottom,
-            )
+            telemetryCaption.animate().alpha(0.4f).setDuration(120L).withEndAction {
+                telemetryCaption.text = message
+                telemetryCaption.animate().alpha(1f).setDuration(180L).start()
+            }.start()
         }
         if (autoHide) {
             warpStageHideJob = safeViewScope {
                 delay(STAGE_TERMINAL_VISIBILITY_MS)
                 binding?.apply {
-                    warpStatusCard.visibility = View.GONE
-                    tunnelList.setPadding(
-                        tunnelList.paddingLeft,
-                        0,
-                        tunnelList.paddingRight,
-                        tunnelList.paddingBottom,
-                    )
+                    val active = Application.getTunnelManager().getTunnels().firstOrNull { it.state == Tunnel.State.UP }
+                    if (active != null) {
+                        telemetryCaption.text = "اتصال پایدار و اختصاصی ZUN برقرار است"
+                        telemetryLiveRow.visibility = View.VISIBLE
+                        statusPill.setBackgroundResource(R.drawable.bg_status_pill_connected)
+                        statusDot.setBackgroundResource(R.drawable.bg_status_dot_connected)
+                        statusPillText.setText(R.string.smart_status_connected)
+                        statusPillText.setTextColor(0xFF3FB950.toInt())
+                    } else {
+                        telemetryCaption.setText(R.string.smart_connect_ready)
+                        telemetryLiveRow.visibility = View.GONE
+                        statusPill.setBackgroundResource(R.drawable.bg_status_pill)
+                        statusDot.setBackgroundResource(R.drawable.bg_status_dot_disconnected)
+                        statusPillText.setText(R.string.smart_status_disconnected)
+                        statusPillText.setTextColor(0xFFE6EDF3.toInt())
+                    }
                 }
             }
         }

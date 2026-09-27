@@ -27,31 +27,148 @@
         android:background="#0D1117"
         android:clipChildren="false">
 
-        <!-- Top status banner — only visible during WARP connection state changes -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/warp_status_card"
+        <!-- Top Container: VIP Profile Card & Status Card -->
+        <LinearLayout
+            android:id="@+id/top_header_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="top"
-            android:layout_marginHorizontal="16dp"
-            android:layout_marginTop="12dp"
-            android:visibility="gone"
-            app:cardBackgroundColor="?attr/colorPrimaryContainer"
-            app:cardCornerRadius="20dp"
-            app:cardElevation="0dp">
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="12dp">
 
-            <TextView
-                android:id="@+id/warp_status_text"
+            <!-- VIP Profile Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/vip_profile_card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingHorizontal="20dp"
-                android:paddingVertical="14dp"
-                android:textAppearance="?attr/textAppearanceBodyLarge"
-                android:textColor="?attr/colorOnPrimaryContainer"
-                tools:text="در حال بررسی بهترین مسیر WARP…" />
-        </com.google.android.material.card.MaterialCardView>
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                app:cardBackgroundColor="@android:color/transparent"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="0dp"
+                app:strokeColor="#30363D"
+                app:strokeWidth="1.2dp">
 
-        <!-- Smart connect (centerpiece) panel — beautiful gradient + glowing button -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_vip_card"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <!-- Top Row: Avatar + Title + VIP Badge -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <FrameLayout
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:background="@drawable/bg_smart_button_halo">
+
+                            <ImageView
+                                android:layout_width="26dp"
+                                android:layout_height="26dp"
+                                android:layout_gravity="center"
+                                android:src="@drawable/ic_vip_crown"
+                                android:contentDescription="VIP Crown" />
+                        </FrameLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="12dp"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="کاربر ویژه ZUN VIP"
+                                android:textColor="#FFFFFF"
+                                android:textSize="15sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="شناسه: #ZUN-77 • ترافیک نامحدود"
+                                android:textColor="#8B949E"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_vip_badge"
+                            android:paddingHorizontal="10dp"
+                            android:paddingVertical="4dp"
+                            android:text="VIP فعال"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <!-- Divider -->
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginVertical="10dp"
+                        android:background="#21262D" />
+
+                    <!-- Bottom Metrics Row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical">
+
+                            <ImageView
+                                android:layout_width="14dp"
+                                android:layout_height="14dp"
+                                android:src="@drawable/ic_shield_check"
+                                android:contentDescription="Shield" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="6dp"
+                                android:text="پروتکل اختصاصی ZUN v2"
+                                android:textColor="#58A6FF"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="0dp"
+                            android:layout_height="1dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="⚡ مسیر بهینه خودکار"
+                            android:textColor="#3FB950"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+
+        </LinearLayout>
+
+        <!-- Smart connect (centerpiece) panel — living cyber power hub -->
         <LinearLayout
             android:id="@+id/smart_connect_panel"
             android:layout_width="match_parent"
@@ -59,73 +176,63 @@
             android:layout_gravity="center"
             android:gravity="center"
             android:orientation="vertical"
-            android:paddingHorizontal="32dp"
-            android:paddingBottom="180dp">
+            android:paddingHorizontal="28dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="60dp">
 
-            <!-- Status pill: shows current state (Disconnected / Connected / Connecting) -->
-            <LinearLayout
-                android:id="@+id/status_pill"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="28dp"
-                android:background="@drawable/bg_status_pill"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="18dp"
-                android:paddingVertical="8dp">
-
-                <View
-                    android:id="@+id/status_dot"
-                    android:layout_width="10dp"
-                    android:layout_height="10dp"
-                    android:layout_marginEnd="10dp"
-                    android:background="@drawable/bg_status_dot_disconnected" />
-
-                <TextView
-                    android:id="@+id/status_pill_text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:letterSpacing="0.08"
-                    android:text="@string/smart_status_disconnected"
-                    android:textAllCaps="true"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
+            <!-- Center button with multi-layer cyber glowing halos and bezel -->
             <FrameLayout
-                android:layout_width="240dp"
-                android:layout_height="240dp"
+                android:layout_width="260dp"
+                android:layout_height="260dp"
+                android:layout_gravity="center"
                 android:clipChildren="false"
                 android:clipToPadding="false">
 
-                <!-- Outer glow ring (rotates while connecting) -->
-                <com.google.android.material.progressindicator.CircularProgressIndicator
-                    android:id="@+id/smart_connect_progress"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:indeterminate="true"
-                    android:visibility="gone"
-                    app:indicatorColor="?attr/colorPrimary"
-                    app:indicatorInset="4dp"
-                    app:indicatorSize="232dp"
-                    app:trackColor="@android:color/transparent"
-                    app:trackThickness="4dp" />
+                <!-- Expanding radar pulse wave (layer 1) -->
+                <View
+                    android:id="@+id/smart_connect_halo_pulse"
+                    android:layout_width="256dp"
+                    android:layout_height="256dp"
+                    android:layout_gravity="center"
+                    android:alpha="0.0"
+                    android:background="@drawable/bg_smart_button_halo_secondary" />
 
-                <!-- Halo behind button (subtle pulse effect when active) -->
+                <!-- Breathing ambient glow aura (layer 2) -->
                 <View
                     android:id="@+id/smart_connect_halo"
-                    android:layout_width="220dp"
-                    android:layout_height="220dp"
+                    android:layout_width="226dp"
+                    android:layout_height="226dp"
                     android:layout_gravity="center"
                     android:alpha="0.18"
                     android:background="@drawable/bg_smart_button_halo" />
 
+                <!-- Metallic / Cyber outer frame bezel (layer 3) -->
+                <View
+                    android:id="@+id/smart_connect_bezel"
+                    android:layout_width="216dp"
+                    android:layout_height="216dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_cyber_button_bezel" />
+
+                <!-- Spinning activity ring (layer 4 - active during connection) -->
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/smart_connect_progress"
+                    android:layout_width="216dp"
+                    android:layout_height="216dp"
+                    android:layout_gravity="center"
+                    android:indeterminate="true"
+                    android:visibility="gone"
+                    app:indicatorColor="#58A6FF"
+                    app:indicatorSize="216dp"
+                    app:trackColor="@android:color/transparent"
+                    app:trackThickness="3dp" />
+
+                <!-- Centerpiece Power Switch (layer 5) -->
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/smart_connect_button"
                     style="@style/Widget.Material3.Button.Icon"
-                    android:layout_width="200dp"
-                    android:layout_height="200dp"
+                    android:layout_width="192dp"
+                    android:layout_height="192dp"
                     android:layout_gravity="center"
                     android:backgroundTint="#1F6FEB"
                     android:contentDescription="@string/smart_connect"
@@ -134,32 +241,113 @@
                     android:insetRight="0dp"
                     android:insetBottom="0dp"
                     android:stateListAnimator="@null"
-                    android:text="@string/smart_connect"
-                    android:textAllCaps="false"
-                    android:textColor="#FFFFFF"
-                    android:textSize="22sp"
-                    android:textStyle="bold"
-                    app:cornerRadius="100dp"
-                    app:icon="@drawable/ic_action_generate"
-                    app:iconGravity="textTop"
-                    app:iconPadding="12dp"
-                    app:iconSize="48dp"
+                    android:text=""
+                    app:cornerRadius="96dp"
+                    app:icon="@drawable/ic_vpn_power"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="56dp"
                     app:iconTint="#FFFFFF"
-                    app:rippleColor="#3FB950" />
+                    app:rippleColor="#58A6FF" />
             </FrameLayout>
 
-            <TextView
-                android:id="@+id/smart_connect_caption"
+            <!-- Status pill: placed professionally directly below the button -->
+            <LinearLayout
+                android:id="@+id/status_pill"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/bg_status_pill"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="18dp"
+                android:paddingVertical="7dp">
+
+                <View
+                    android:id="@+id/status_dot"
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:background="@drawable/bg_status_dot_disconnected" />
+
+                <TextView
+                    android:id="@+id/status_pill_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:letterSpacing="0.04"
+                    android:text="@string/smart_status_disconnected"
+                    android:textColor="#E6EDF3"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Modern Telemetry & Protection Status Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/connection_telemetry_card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:alpha="0.85"
-                android:gravity="center"
-                android:letterSpacing="0.02"
-                android:maxLines="2"
-                android:text="@string/smart_connect_ready"
-                android:textAppearance="?attr/textAppearanceBodyLarge"
-                android:textColor="?attr/colorOnSurfaceVariant" />
+                android:layout_marginHorizontal="8dp"
+                app:cardBackgroundColor="#111622"
+                app:cardCornerRadius="18dp"
+                app:cardElevation="2dp"
+                app:strokeColor="#243048"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="14dp">
+
+                    <TextView
+                        android:id="@+id/telemetry_title"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="وضعیت شبکه اختصاصی ZUN"
+                        android:textColor="#8B949E"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/telemetry_caption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:gravity="center"
+                        android:text="@string/smart_connect_ready"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <!-- Live indicators row: visible when connected -->
+                    <LinearLayout
+                        android:id="@+id/telemetry_live_row"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:visibility="gone"
+                        tools:visibility="visible">
+
+                        <TextView
+                            android:id="@+id/telemetry_shield_chip"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_vip_badge"
+                            android:backgroundTint="#152438"
+                            android:paddingHorizontal="12dp"
+                            android:paddingVertical="5dp"
+                            android:text="🛡️ رمزنگاری کوانتومی اختصاصی ZUN فعال است"
+                            android:textColor="#58A6FF"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
 
         <androidx.recyclerview.widget.RecyclerView
@@ -182,7 +370,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|center_horizontal"
-            android:layout_marginBottom="180dp"
+            android:layout_marginBottom="90dp"
             android:orientation="vertical"
             android:visibility="@{tunnels.size() == 0 ? android.view.View.VISIBLE : android.view.View.GONE}"
             tools:visibility="visible">
