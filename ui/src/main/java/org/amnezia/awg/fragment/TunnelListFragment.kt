@@ -48,6 +48,7 @@ import org.amnezia.awg.util.TunnelImporter
 import org.amnezia.awg.widget.MultiselectableRelativeLayout
 import org.amnezia.awg.warp.WarpProvisioner
 import org.amnezia.awg.warp.WarpProfileCandidate
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -73,6 +74,13 @@ class TunnelListFragment : BaseFragment() {
     private var smartConnectHaloAnimator: ObjectAnimator? = null
     private var isSmartConnecting = false
     private var pendingSmartConnectTunnel: ObservableTunnel? = null
+
+    private inline fun safeViewScope(crossinline block: suspend CoroutineScope.() -> Unit): Job? {
+        if (!isAdded || view == null) return null
+        val scope = viewLifecycleOwnerLiveData.value?.lifecycleScope ?: return null
+        return scope.launch { block() }
+    }
+
     private val warpVpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -80,7 +88,7 @@ class TunnelListFragment : BaseFragment() {
         pendingSmartConnectTunnel = null
         if (result.resultCode == Activity.RESULT_OK) {
             if (pendingTunnel != null) {
-                viewLifecycleOwner.lifecycleScope.launch { connectReusableWarpTunnel(pendingTunnel) }
+                safeViewScope { connectReusableWarpTunnel(pendingTunnel) }
             } else {
                 createAndVerifyWarpProfile()
             }
@@ -178,6 +186,8 @@ class TunnelListFragment : BaseFragment() {
     }
 
     override fun onDestroyView() {
+        smartConnectJob?.cancel()
+        warpStageHideJob?.cancel()
         smartConnectHaloAnimator?.cancel()
         smartConnectHaloAnimator = null
         smartConnectAnimator?.cancel()
@@ -253,7 +263,7 @@ class TunnelListFragment : BaseFragment() {
     override fun onResume() {
         super.onResume()
         refreshSmartConnectUi()
-        viewLifecycleOwner.lifecycleScope.launch {
+        safeViewScope {
             val allTunnels = Application.getTunnelManager().getTunnels()
             val filtered = ObservableSortedKeyedArrayList<String, ObservableTunnel>(TunnelComparator)
             for (t in allTunnels) {
@@ -274,8 +284,9 @@ class TunnelListFragment : BaseFragment() {
     }
 
     private fun warmUpWarpIdentities() {
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            runCatching { WarpProvisioner(requireContext()).ensureIdentityPool() }
+        lifecycleScope.launch(Dispatchers.IO) {
+            val ctx = context ?: return@launch
+            runCatching { WarpProvisioner(ctx).ensureIdentityPool() }
                 .onFailure { error -> Log.w(TAG, "WARP identity warm-up did not finish", error) }
         }
     }
@@ -290,7 +301,7 @@ class TunnelListFragment : BaseFragment() {
             showSnackbar(getString(R.string.smart_connect_busy))
             return
         }
-        smartConnectJob = viewLifecycleOwner.lifecycleScope.launch {
+        smartConnectJob = safeViewScope {
             val manager = Application.getTunnelManager()
             val tunnels = manager.getTunnels()
             val active = tunnels.firstOrNull { it.state == Tunnel.State.UP }
@@ -300,14 +311,14 @@ class TunnelListFragment : BaseFragment() {
                     .onFailure { error -> showSnackbar(getString(R.string.error_down, ErrorMessages[error])) }
                 setSmartConnectBusy(false)
                 refreshSmartConnectUi()
-                return@launch
+                return@safeViewScope
             }
 
             val reusable = tunnels.firstOrNull { isWarpProfile(it) }
             if (reusable == null) {
                 setSmartConnectBusy(true, getString(R.string.smart_connect_preparing), showDotAsConnecting = true)
                 prepareVerifiedWarpProfile()
-                return@launch
+                return@safeViewScope
             }
 
             try {
@@ -316,7 +327,7 @@ class TunnelListFragment : BaseFragment() {
                     if (intent != null) {
                         pendingSmartConnectTunnel = reusable
                         warpVpnPermissionLauncher.launch(intent)
-                        return@launch
+                        return@safeViewScope
                     }
                 }
                 connectReusableWarpTunnel(reusable)
@@ -347,8 +358,8 @@ class TunnelListFragment : BaseFragment() {
 
     private fun refreshSmartConnectUi() {
         val currentBinding = binding ?: return
-        viewLifecycleOwner.lifecycleScope.launch {
-            if (isSmartConnecting) return@launch
+        safeViewScope {
+            if (isSmartConnecting) return@safeViewScope
             val active = Application.getTunnelManager().getTunnels().firstOrNull { it.state == Tunnel.State.UP }
             if (active != null) {
                 currentBinding.smartConnectButton.setText(R.string.smart_disconnect)
@@ -449,13 +460,13 @@ class TunnelListFragment : BaseFragment() {
 
     private fun prepareVerifiedWarpProfile() {
         val activity = activity ?: return
-        viewLifecycleOwner.lifecycleScope.launch {
+        safeViewScope {
             try {
                 if (Application.getBackend() is GoBackend) {
                     val intent = GoBackend.VpnService.prepare(activity)
                     if (intent != null) {
                         warpVpnPermissionLauncher.launch(intent)
-                        return@launch
+                        return@safeViewScope
                     }
                 }
                 createAndVerifyWarpProfile()
@@ -476,7 +487,7 @@ class TunnelListFragment : BaseFragment() {
         setSmartConnectBusy(true, getString(R.string.smart_connect_connecting))
         updateWarpStage(getString(R.string.warp_stage_preparing))
         showSnackbar(getString(R.string.warp_verified_testing))
-        viewLifecycleOwner.lifecycleScope.launch {
+        safeViewScope {
             var createdTunnel: ObservableTunnel? = null
             var previouslyActive: ObservableTunnel? = null
             val manager = Application.getTunnelManager()
@@ -629,7 +640,7 @@ class TunnelListFragment : BaseFragment() {
             )
         }
         if (autoHide) {
-            warpStageHideJob = viewLifecycleOwner.lifecycleScope.launch {
+            warpStageHideJob = safeViewScope {
                 delay(STAGE_TERMINAL_VISIBILITY_MS)
                 binding?.apply {
                     warpStatusCard.visibility = View.GONE

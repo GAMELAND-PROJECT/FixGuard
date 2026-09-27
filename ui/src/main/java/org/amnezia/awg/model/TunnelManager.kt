@@ -203,16 +203,28 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
             tunnel.onConnectionStatusChanged(ObservableTunnel.ConnectionStatus.CONNECTING)
             val activation = withContext(Dispatchers.IO) {
                 val backend = getBackend()
-                backend.setState(tunnel, Tunnel.State.DOWN, null)
-                delay(250L)
-                if (awgRecovery.isManagedConfig(selectedConfig)) {
-                    activateManagedWarp(tunnel, selectedConfig)
-                } else {
-                    WarpActivation(
-                        backend.setState(tunnel, Tunnel.State.UP, selectedConfig),
-                        selectedConfig,
-                    )
+                var result: WarpActivation? = null
+                var lastErr: Throwable? = null
+                // Attempt rebind with retries to allow cellular modem/tower negotiation to settle after calls/drops
+                for (attempt in 0..2) {
+                    try {
+                        backend.setState(tunnel, Tunnel.State.DOWN, null)
+                        delay(250L + attempt * 250L)
+                        result = if (awgRecovery.isManagedConfig(selectedConfig)) {
+                            activateManagedWarp(tunnel, selectedConfig)
+                        } else {
+                            WarpActivation(
+                                backend.setState(tunnel, Tunnel.State.UP, selectedConfig),
+                                selectedConfig,
+                            )
+                        }
+                        if (result.state == Tunnel.State.UP) break
+                    } catch (t: Throwable) {
+                        lastErr = t
+                        Log.w(TAG, "Network rebind attempt ${attempt + 1} failed: ${t.message}")
+                    }
                 }
+                result ?: throw (lastErr ?: IllegalStateException("Could not reconnect after network change"))
             }
             if (activation.config != currentConfig) {
                 withContext(Dispatchers.IO) { configStore.save(tunnel.name, activation.config) }

@@ -97,7 +97,10 @@ class TunnelHealthMonitor(
             if ((!handshakeIsOld && !handshakeIsMissing && !outgoingIsUnanswered) ||
                 now - lastProbeAt < PROBE_INTERVAL_MS)
                 continue
-            if (!hasPhysicalInternet()) continue
+            if (!hasPhysicalInternet()) {
+                unansweredSince = 0L
+                continue
+            }
 
             lastProbeAt = now
             val degradationReason = when {
@@ -143,7 +146,8 @@ class TunnelHealthMonitor(
             cm.allNetworks.any { network ->
                 val capabilities = cm.getNetworkCapabilities(network) ?: return@any false
                 !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
-                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED)
             }
         }.getOrDefault(false)
     }
