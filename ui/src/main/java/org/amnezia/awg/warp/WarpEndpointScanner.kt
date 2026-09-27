@@ -134,9 +134,13 @@ class WarpEndpointScanner(context: Context) {
     private fun probe(endpoint: WarpEndpoint, network: Network?): WarpEndpoint? {
         val started = System.nanoTime()
         return runCatching {
-            (network?.socketFactory?.createSocket() ?: Socket()).use { socket ->
-                socket.tcpNoDelay = true
-                socket.connect(InetSocketAddress(endpoint.host, PROBE_PORT), CONNECT_TIMEOUT_MS)
+            val socket = network?.socketFactory?.createSocket() ?: Socket()
+            socket.use { s ->
+                s.tcpNoDelay = true
+                if (network != null) {
+                    runCatching { network.bindSocket(s) }
+                }
+                s.connect(InetSocketAddress(endpoint.host, PROBE_PORT), CONNECT_TIMEOUT_MS)
             }
             endpoint.copy(latencyMs = (System.nanoTime() - started) / 1_000_000)
         }.getOrNull()
@@ -167,12 +171,14 @@ class WarpEndpointScanner(context: Context) {
     }
 
     private fun currentPhysicalNetwork(): Network? {
-        val manager = appContext.getSystemService(ConnectivityManager::class.java)
-        val candidates = manager.allNetworks.filter { network ->
-            val capabilities = manager.getNetworkCapabilities(network) ?: return@filter false
-            !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
-                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        }
+        val manager = appContext.getSystemService(ConnectivityManager::class.java) ?: return null
+        val candidates = runCatching {
+            manager.allNetworks.filter { network ->
+                val capabilities = manager.getNetworkCapabilities(network) ?: return@filter false
+                !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+        }.getOrDefault(emptyList())
         return candidates.firstOrNull { network ->
             manager.getNetworkCapabilities(network)
                 ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
@@ -181,8 +187,8 @@ class WarpEndpointScanner(context: Context) {
 
     private fun currentNetworkKey(network: Network?): String {
         if (network == null) return "offline"
-        val manager = appContext.getSystemService(ConnectivityManager::class.java)
-        val capabilities = manager.getNetworkCapabilities(network)
+        val manager = appContext.getSystemService(ConnectivityManager::class.java) ?: return "other"
+        val capabilities = runCatching { manager.getNetworkCapabilities(network) }.getOrNull()
         val transport = when {
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "wifi"
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "cellular"

@@ -155,8 +155,20 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
                         )
                     }
                 } catch (error: Throwable) {
-                    runCatching { backend.setState(tunnel, Tunnel.State.UP, currentConfig) }
-                    throw error
+                    Log.w(TAG, "Primary recovery candidate failed: ${error.message}; trying alternate route")
+                    // Fail-forward: Attempt alternate best candidate rather than reviving the dead connection
+                    val alternateConfig = runCatching { awgRecovery.bestConfig(recoveryConfig) }.getOrNull()
+                    if (alternateConfig != null && alternateConfig != recoveryConfig) {
+                        runCatching {
+                            if (awgRecovery.isManagedConfig(alternateConfig)) {
+                                activateManagedWarp(tunnel, alternateConfig)
+                            } else {
+                                WarpActivation(backend.setState(tunnel, Tunnel.State.UP, alternateConfig), alternateConfig)
+                            }
+                        }.getOrNull() ?: throw error
+                    } else {
+                        throw error
+                    }
                 }
             }
             if (activation.config != currentConfig) {
@@ -406,27 +418,30 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
 
     private suspend fun verifyWarpDataPath(): Boolean {
         repeat(WARP_DATA_PATH_ATTEMPTS) { attempt ->
-            val verified = runCatching {
-                val connection = URL(WARP_TRACE_URL).openConnection() as HttpURLConnection
-                try {
-                    connection.connectTimeout = WARP_DATA_PATH_TIMEOUT_MS
-                    connection.readTimeout = WARP_DATA_PATH_TIMEOUT_MS
-                    connection.instanceFollowRedirects = false
-                    connection.useCaches = false
-                    connection.setRequestProperty("Connection", "close")
-                    connection.responseCode in 200..299 && connection.inputStream
-                        .bufferedReader()
-                        .useLines { lines ->
-                            lines.any { line ->
-                                line.equals("warp=on", ignoreCase = true) ||
-                                    line.equals("warp=plus", ignoreCase = true)
+            for (traceUrl in WARP_TRACE_URLS) {
+                val verified = runCatching {
+                    val connection = URL(traceUrl).openConnection() as HttpURLConnection
+                    try {
+                        connection.connectTimeout = WARP_DATA_PATH_TIMEOUT_MS
+                        connection.readTimeout = WARP_DATA_PATH_TIMEOUT_MS
+                        connection.instanceFollowRedirects = false
+                        connection.useCaches = false
+                        connection.setRequestProperty("Connection", "close")
+                        connection.setRequestProperty("User-Agent", "FixGuard/Warp")
+                        connection.responseCode in 200..299 && connection.inputStream
+                            .bufferedReader()
+                            .useLines { lines ->
+                                lines.any { line ->
+                                    line.equals("warp=on", ignoreCase = true) ||
+                                        line.equals("warp=plus", ignoreCase = true)
+                                }
                             }
-                        }
-                } finally {
-                    connection.disconnect()
-                }
-            }.getOrDefault(false)
-            if (verified) return true
+                    } finally {
+                        connection.disconnect()
+                    }
+                }.getOrDefault(false)
+                if (verified) return true
+            }
             if (attempt + 1 < WARP_DATA_PATH_ATTEMPTS) delay(WARP_DATA_PATH_RETRY_DELAY_MS)
         }
         return false
@@ -524,6 +539,11 @@ class TunnelManager(private val configStore: ConfigStore) : BaseObservable() {
         private const val WARP_DATA_PATH_RETRY_DELAY_MS = 500L
         private const val WARP_RETRY_BASE_DELAY_MS = 500L
         private const val WARP_TRACE_URL = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
+        private val WARP_TRACE_URLS = listOf(
+            "https://1.1.1.1/cdn-cgi/trace",
+            "https://162.159.192.1/cdn-cgi/trace",
+            WARP_TRACE_URL,
+        )
     }
 
     private data class WarpActivation(val state: Tunnel.State, val config: Config)

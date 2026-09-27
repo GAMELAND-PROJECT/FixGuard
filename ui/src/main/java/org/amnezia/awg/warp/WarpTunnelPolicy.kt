@@ -12,16 +12,21 @@ class WarpTunnelPolicyResolver(context: Context) {
         .getSystemService(ConnectivityManager::class.java)
 
     fun current(): WarpTunnelPolicy {
-        val capabilities = connectivity.activeNetwork
-            ?.let(connectivity::getNetworkCapabilities)
-            ?.takeIf { !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) }
+        val cm = connectivity ?: return WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 12)
+        val capabilities = runCatching {
+            cm.activeNetwork
+                ?.let(cm::getNetworkCapabilities)
+                ?.takeIf { !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) }
+        }.getOrNull()
+
         return when {
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true ->
                 WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 12)
             capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true ->
-                WarpTunnelPolicy(mtu = 1360, keepaliveSeconds = 20)
-            capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true ->
-                WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 15)
+                WarpTunnelPolicy(mtu = 1420, keepaliveSeconds = 20)
+            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true ||
+                capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true ->
+                WarpTunnelPolicy(mtu = 1360, keepaliveSeconds = 15)
             else -> WarpTunnelPolicy(mtu = 1280, keepaliveSeconds = 12)
         }
     }
