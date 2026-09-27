@@ -22,7 +22,7 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.10.0"
 }
 
-rootProject.name = "amneziawg-android"
+rootProject.name = "ZUN-VPN-Android"
 
 include(":tunnel")
 include(":ui")

@@ -291,9 +291,9 @@ class TunnelListFragment : BaseFragment() {
         }
     }
 
-    /** WARP profiles are managed by the central connect button and stay hidden from the list. */
+    /** Dedicated ZUN & WARP profiles are managed by the central connect button and stay hidden from the list. */
     private fun isWarpProfile(tunnel: ObservableTunnel): Boolean =
-        tunnel.name.startsWith(WARP_TUNNEL_PREFIX)
+        tunnel.name.startsWith(WARP_TUNNEL_PREFIX) || tunnel.name.startsWith("ZUN-")
 
     private fun onSmartConnectClicked() {
         binding?.smartConnectButton?.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
@@ -500,9 +500,9 @@ class TunnelListFragment : BaseFragment() {
                         val candidates = provisioner.createConnectionCandidates()
                         check(candidates.isNotEmpty()) { "No WARP connection candidates were produced" }
 
-                        var name = "WARP"
+                        var name = "ZUN-VIP"
                         var suffix = 2
-                        while (tunnels.containsKey(name)) name = "WARP-${suffix++}"
+                        while (tunnels.containsKey(name)) name = "ZUN-VIP-${suffix++}"
                         val tunnel = manager.create(name, candidates.first().config)
                         createdTunnel = tunnel
                         // Force immediate refresh so new WARP profile appears in list

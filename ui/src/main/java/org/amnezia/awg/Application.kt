@@ -171,9 +171,9 @@ class Application : android.app.Application() {
     }
 
     companion object {
-        val USER_AGENT = String.format(Locale.ENGLISH, "AmneziaWG/%s (Android %d; %s; %s; %s %s; %s)", BuildConfig.VERSION_NAME, Build.VERSION.SDK_INT, if (Build.SUPPORTED_ABIS.isNotEmpty()) Build.SUPPORTED_ABIS[0] else "unknown ABI", Build.BOARD, Build.MANUFACTURER, Build.MODEL, Build.FINGERPRINT)
+        val USER_AGENT = String.format(Locale.ENGLISH, "ZUNVPN/%s (Android %d; %s; %s; %s %s; %s)", BuildConfig.VERSION_NAME, Build.VERSION.SDK_INT, if (Build.SUPPORTED_ABIS.isNotEmpty()) Build.SUPPORTED_ABIS[0] else "unknown ABI", Build.BOARD, Build.MANUFACTURER, Build.MODEL, Build.FINGERPRINT)
         private const val NETWORK_CHANGE_DEBOUNCE_MS = 1_250L
-        private const val TAG = "AmneziaWG/Application"
+        private const val TAG = "ZUNVPN/Application"
         private lateinit var weakSelf: WeakReference<Application>
 
         fun get(): Application {

@@ -59,6 +59,8 @@ class MainActivity : BaseActivity(), FragmentManager.OnBackStackChangedListener 
         super.onCreate(savedInstanceState)
         setContentView(R.layout.main_activity)
         actionBar = supportActionBar
+        title = getString(R.string.app_name)
+        actionBar?.title = getString(R.string.app_name)
         isTwoPaneLayout = findViewById<View?>(R.id.master_detail_wrapper) != null
         supportFragmentManager.addOnBackStackChangedListener(this)
         backPressedCallback = onBackPressedDispatcher.addCallback(this) { handleBackPressed() }
@@ -110,8 +112,8 @@ class MainActivity : BaseActivity(), FragmentManager.OnBackStackChangedListener 
             return false
         }
 
-        // Hide detail fragment for WARP-managed profiles — they should never open the config view
-        if (newTunnel != null && newTunnel.name.startsWith("WARP")) {
+        // Hide detail fragment for ZUN-managed profiles — they should never open the config view
+        if (newTunnel != null && (newTunnel.name.startsWith("WARP") || newTunnel.name.startsWith("ZUN-"))) {
             // Pop any open detail/editor fragments and stay on the list
             fragmentManager.popBackStackImmediate(0, FragmentManager.POP_BACK_STACK_INCLUSIVE)
             return true

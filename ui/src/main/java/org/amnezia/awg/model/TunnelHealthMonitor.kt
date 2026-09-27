@@ -28,7 +28,7 @@ class TunnelHealthMonitor(
     private val connectivityManager = context.applicationContext
         .getSystemService(ConnectivityManager::class.java)
     private val powerManager = context.applicationContext.getSystemService(PowerManager::class.java)
-    private val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FixGuard:HealthProbe")?.apply {
+    private val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ZUNVPN:HealthProbe")?.apply {
         setReferenceCounted(false)
     }
     private val diagnostics = ConnectionHealthStore(context.applicationContext)
@@ -185,7 +185,7 @@ class TunnelHealthMonitor(
     }.getOrDefault(false)
 
     private companion object {
-        const val TAG = "FixGuard/TunnelHealth"
+        const val TAG = "ZUNVPN/TunnelHealth"
         const val PROBE_FALLBACK_URL = "https://1.1.1.1/cdn-cgi/trace"
         const val PROBE_DIRECT_IP_URL = "https://162.159.192.1/cdn-cgi/trace"
         const val PROBE_URL = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
