@@ -305,10 +305,27 @@ class TunnelListFragment : BaseFragment() {
     private fun isWarpProfile(tunnel: ObservableTunnel): Boolean =
         tunnel.name.startsWith(WARP_TUNNEL_PREFIX) || tunnel.name.startsWith("ZUN-")
 
+    private fun cancelSmartConnectSearch() {
+        smartConnectJob?.cancel()
+        smartConnectJob = null
+        isSmartConnecting = false
+        setSmartConnectBusy(false)
+        stopCyberGyroscopicRotation()
+        safeViewScope {
+            val manager = Application.getTunnelManager()
+            val tunnels = manager.getTunnels()
+            val active = tunnels.firstOrNull { it.state == Tunnel.State.UP }
+            active?.setStateAsync(Tunnel.State.DOWN)
+            refreshSmartConnectUi()
+        }
+        updateWarpStage("پویش سرورها توسط کاربر متوقف شد", autoHide = true)
+        showSnackbar("عملیات جستجوی سرور متوقف گردید")
+    }
+
     private fun onSmartConnectClicked() {
         binding?.smartConnectButton?.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
         if (isSmartConnecting || smartConnectJob?.isActive == true) {
-            showSnackbar(getString(R.string.smart_connect_busy))
+            cancelSmartConnectSearch()
             return
         }
         smartConnectJob = safeViewScope {
@@ -557,7 +574,7 @@ class TunnelListFragment : BaseFragment() {
     private fun setSmartConnectBusy(busy: Boolean, caption: CharSequence? = null, showDotAsConnecting: Boolean = true) {
         isSmartConnecting = busy
         binding?.apply {
-            smartConnectButton.isEnabled = !busy
+            smartConnectButton.isEnabled = true // Always allow clicks so user can tap to stop
             smartConnectButton.icon = null
             smartConnectButton.setIconResource(0)
             smartConnectIcon.setImageResource(R.drawable.ic_vpn_power)
@@ -792,105 +809,86 @@ class TunnelListFragment : BaseFragment() {
         val currentBinding = binding ?: return
         currentBinding.optimizeWarpFab.isEnabled = false
         setSmartConnectBusy(true, getString(R.string.smart_connect_connecting))
-        updateWarpStage(getString(R.string.warp_stage_preparing))
-        showSnackbar(getString(R.string.warp_verified_testing))
-        safeViewScope {
+        updateWarpStage("در حال بررسی و اعتبارسنجی حساب کاربری امن...")
+        showSnackbar("آغاز پویش پیوسته سرورها تا برقراری اتصال...")
+        smartConnectJob = safeViewScope {
             var createdTunnel: ObservableTunnel? = null
             var previouslyActive: ObservableTunnel? = null
             val manager = Application.getTunnelManager()
             try {
                 manager.withAutomaticRecoveryPaused {
                     runCatching {
+                        val provisioner = WarpProvisioner(requireContext())
+                        val identity = provisioner.ensureVerifiedIdentity()
+                        updateWarpStage("حساب کاربری امن تایید شد • آغاز پویش پیوسته سرورها")
+
                         val tunnels = manager.getTunnels()
                         previouslyActive = tunnels.firstOrNull { it.state == Tunnel.State.UP }
-                        val provisioner = WarpProvisioner(requireContext())
-                        val candidates = provisioner.createConnectionCandidates()
-                        check(candidates.isNotEmpty()) { "No WARP connection candidates were produced" }
 
                         var name = "ZUN-VIP"
                         var suffix = 2
                         while (tunnels.containsKey(name)) name = "ZUN-VIP-${suffix++}"
-                        val tunnel = manager.create(name, candidates.first().config)
+                        
+                        val initialCandidate = provisioner.getCandidateAt(identity, 0)
+                        val tunnel = manager.create(name, initialCandidate.config)
                         createdTunnel = tunnel
-                        // Force immediate refresh so new WARP profile appears in list
                         refreshSmartConnectUi()
                         var completedHandshake = false
 
-                        val verifiedRoutes = mutableListOf<VerifiedWarpRoute>()
-                        for ((index, candidate) in candidates.withIndex()) {
-                            val scanningText = getString(
-                                R.string.warp_stage_scanning,
-                                index + 1,
-                                candidates.size,
-                                candidate.endpoint.authority,
-                            )
+                        var candidateIndex = 0
+                        while (isActive) {
+                            val candidate = provisioner.getCandidateAt(identity, candidateIndex++)
+                            val testNumber = candidateIndex
+                            val scanningText = "پویش پیوسته: تست #$testNumber (${candidate.endpoint.authority}) • برای لغو لمس کنید"
                             updateWarpStage(scanningText)
                             currentBinding.telemetryCaption.text = scanningText
-                            Log.i(TAG, "Testing WARP candidate ${index + 1}/${candidates.size}: ${candidate.endpoint.authority}")
-                            if (index > 0) tunnel.setConfigAsync(candidate.config)
+                            Log.i(TAG, "Testing candidate #$testNumber: ${candidate.endpoint.authority}")
+
+                            tunnel.setConfigAsync(candidate.config)
                             val attemptStartedAt = System.currentTimeMillis() / 1000L - 1L
                             val attemptStartedElapsed = SystemClock.elapsedRealtime()
                             tunnel.setStateAsync(Tunnel.State.UP)
-                            updateWarpStage(getString(R.string.warp_stage_handshake, candidate.endpoint.authority))
-                            val handshakeWaitSeconds = if (index < LONG_HANDSHAKE_ATTEMPTS)
-                                HANDSHAKE_WAIT_SECONDS else FAST_HANDSHAKE_WAIT_SECONDS
+
+                            updateWarpStage("ارسال بسته‌های Handshake به ${candidate.endpoint.authority}...")
                             val handshaked = awaitFreshHandshake(
                                 tunnel,
                                 attemptStartedAt,
-                                handshakeWaitSeconds,
+                                HANDSHAKE_WAIT_SECONDS,
                             )
                             val handshakeMs = SystemClock.elapsedRealtime() - attemptStartedElapsed
                             completedHandshake = completedHandshake || handshaked
-                            Log.i(TAG, "WARP handshake ${if (handshaked) "succeeded" else "timed out"}: ${candidate.endpoint.authority}")
+                            Log.i(TAG, "Candidate #$testNumber handshake ${if (handshaked) "succeeded" else "timed out"}")
+
                             if (handshaked) {
-                                updateWarpStage(getString(R.string.warp_stage_verifying))
+                                updateWarpStage("دست‌تکانی موفق (#$testNumber) • در حال اعتبارسنجی ترافیک...")
                                 delay(DATA_PATH_SETTLE_MS)
                                 val validationStartedElapsed = SystemClock.elapsedRealtime()
                                 val routed = verifyWarpDataPath()
                                 val validationMs = SystemClock.elapsedRealtime() - validationStartedElapsed
-                                Log.i(TAG, "WARP data path ${if (routed) "verified" else "failed"}: ${candidate.endpoint.authority}")
+                                Log.i(TAG, "Candidate #$testNumber data path ${if (routed) "verified" else "failed"}")
                                 if (routed) {
                                     provisioner.recordEndpointSuccess(
                                         candidate.endpoint,
                                         handshakeMs,
                                         validationMs,
                                     )
-                                    verifiedRoutes += VerifiedWarpRoute(
-                                        candidate,
-                                        handshakeMs + validationMs,
-                                    )
+                                    // INSTANT-LOCK: Successfully connected and verified!
+                                    return@runCatching tunnel to candidate.endpoint
                                 }
                             }
-                            if (verifiedRoutes.none { it.candidate.endpoint == candidate.endpoint })
-                                provisioner.recordEndpointFailure(candidate.endpoint)
+
+                            provisioner.recordEndpointFailure(candidate.endpoint)
                             tunnel.setStateAsync(Tunnel.State.DOWN)
-                            // Android may need a short window to release the previous VPN network
-                            // and UDP socket before the next endpoint is evaluated.
                             delay(CANDIDATE_SWITCH_DELAY_MS)
-                            if (verifiedRoutes.size >= VERIFIED_ROUTES_TO_COMPARE ||
-                                verifiedRoutes.isNotEmpty() && index + 1 >= MAX_DISCOVERY_ATTEMPTS)
-                                break
                         }
 
-                        // Reconnect the fastest fully verified route. If it changed underneath us,
-                        // immediately fall through to the next verified route.
-                        updateWarpStage(getString(R.string.warp_stage_selecting))
-                        for (route in verifiedRoutes.sortedBy(VerifiedWarpRoute::qualityMs)) {
-                            tunnel.setConfigAsync(route.candidate.config)
-                            val attemptStartedAt = System.currentTimeMillis() / 1000L - 1L
-                            tunnel.setStateAsync(Tunnel.State.UP)
-                            if (awaitFreshHandshake(tunnel, attemptStartedAt, HANDSHAKE_WAIT_SECONDS)) {
-                                delay(DATA_PATH_SETTLE_MS)
-                                if (verifyWarpDataPath())
-                                    return@runCatching tunnel to route.candidate.endpoint
-                            }
-                            provisioner.recordEndpointFailure(route.candidate.endpoint)
-                            tunnel.setStateAsync(Tunnel.State.DOWN)
-                            delay(CANDIDATE_SWITCH_DELAY_MS)
+                        if (!isActive) {
+                            error("عملیات پویش توسط کاربر متوقف شد")
                         }
-                        if (completedHandshake)
-                            error("WARP handshake succeeded, but routed Internet verification failed")
-                        error("WARP did not complete a handshake on any supported endpoint")
+                        if (completedHandshake) {
+                            error("دست‌تکانی برقرار شد اما اعتبارسنجی ترافیک اینترنت تایید نشد")
+                        }
+                        error("هیچ سرور سالمی پاسخ نداد")
                     }.onSuccess { (tunnel, endpoint) ->
                         // Keep WARP profiles hidden — don't navigate to TunnelDetailFragment
                         // Just update the smart connect button state and show success
@@ -918,11 +916,15 @@ class TunnelListFragment : BaseFragment() {
                                 .onFailure { restoreError -> Log.e(TAG, "Could not restore previous tunnel", restoreError) }
                         }
                         val reason = error.message?.takeIf { it.isNotBlank() } ?: ErrorMessages[error]
-                        updateWarpStage(
-                            getString(R.string.warp_stage_failed, reason),
-                            autoHide = true,
-                        )
-                        showSnackbar(getString(R.string.warp_verified_error, reason))
+                        if (error is kotlinx.coroutines.CancellationException || reason.contains("متوقف شد")) {
+                            updateWarpStage("پویش سرورها توسط کاربر متوقف شد", autoHide = true)
+                        } else {
+                            updateWarpStage(
+                                getString(R.string.warp_stage_failed, reason),
+                                autoHide = true,
+                            )
+                            showSnackbar(getString(R.string.warp_verified_error, reason))
+                        }
                     }
                 }
             } finally {
@@ -971,8 +973,9 @@ class TunnelListFragment : BaseFragment() {
         attemptStartedAt: Long,
         waitSeconds: Int,
     ): Boolean {
-        repeat(waitSeconds) {
-            delay(1_000L)
+        val totalPolls = waitSeconds * 2
+        repeat(totalPolls) {
+            delay(500L)
             val handshake = withContext(Dispatchers.IO) {
                 runCatching { Application.getBackend().getLastHandshake(tunnel) }.getOrDefault(0L)
             }
@@ -983,13 +986,9 @@ class TunnelListFragment : BaseFragment() {
 
     /** A handshake proves peer authentication; this additionally proves routed Internet access. */
     private suspend fun verifyWarpDataPath(): Boolean {
-        var successes = 0
-        repeat(DATA_PATH_ATTEMPTS) { attempt ->
-            if (probeWarpDataPath()) successes++
-            if (successes >= REQUIRED_DATA_PATH_SUCCESSES) return true
-            val remainingAttempts = DATA_PATH_ATTEMPTS - attempt - 1
-            if (successes + remainingAttempts < REQUIRED_DATA_PATH_SUCCESSES) return false
-            if (attempt < DATA_PATH_ATTEMPTS - 1) delay(DATA_PATH_RETRY_DELAY_MS)
+        repeat(2) { attempt ->
+            if (probeWarpDataPath()) return true
+            if (attempt < 1) delay(250L)
         }
         return false
     }
@@ -1133,19 +1132,15 @@ class TunnelListFragment : BaseFragment() {
         private const val TAG = "AmneziaWG/TunnelListFragment"
         private const val WARP_TUNNEL_PREFIX = "WARP"
         private const val SMART_CONNECT_ROTATION_MS = 1_100L
-        private const val HANDSHAKE_WAIT_SECONDS = 10
-        private const val FAST_HANDSHAKE_WAIT_SECONDS = 6
+        private const val HANDSHAKE_WAIT_SECONDS = 3
+        private const val FAST_HANDSHAKE_WAIT_SECONDS = 2
         private const val LONG_HANDSHAKE_ATTEMPTS = 2
-        private const val VERIFIED_ROUTES_TO_COMPARE = 2
-        private const val MAX_DISCOVERY_ATTEMPTS = 4
+        private const val MAX_DISCOVERY_ATTEMPTS = 6
         private const val WARP_TRACE_URL = "https://connectivity.cloudflareclient.com/cdn-cgi/trace"
         private const val WARP_TRACE_FALLBACK_URL = "https://1.1.1.1/cdn-cgi/trace"
-        private const val DATA_PATH_TIMEOUT_MS = 6_000
-        private const val DATA_PATH_SETTLE_MS = 500L
+        private const val DATA_PATH_TIMEOUT_MS = 2_800
+        private const val DATA_PATH_SETTLE_MS = 250L
         private const val STAGE_TERMINAL_VISIBILITY_MS = 6_000L
-        private const val DATA_PATH_ATTEMPTS = 3
-        private const val REQUIRED_DATA_PATH_SUCCESSES = 2
-        private const val DATA_PATH_RETRY_DELAY_MS = 750L
-        private const val CANDIDATE_SWITCH_DELAY_MS = 500L
+        private const val CANDIDATE_SWITCH_DELAY_MS = 250L
     }
 }

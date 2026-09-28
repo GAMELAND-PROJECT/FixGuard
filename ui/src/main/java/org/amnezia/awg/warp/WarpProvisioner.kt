@@ -31,26 +31,55 @@ class WarpProvisioner(context: Context) {
     /** Returns complete profiles whose endpoints still require a real AWG handshake test. */
     suspend fun createConnectionCandidates(): List<WarpProfileCandidate> = withContext(Dispatchers.IO) {
         provisionMutex.withLock {
-            val identities = ensureIdentityPoolLocked(TARGET_IDENTITY_COUNT).ifEmpty {
-                listOf(loadCurrentIdentity())
-            }
+            val identity = ensureIdentityPoolLocked(TARGET_IDENTITY_COUNT).firstOrNull() ?: loadCurrentIdentity()
             val policy = policyResolver.current()
-            identities.flatMap { identity ->
-                endpointScanner.connectionCandidates(identity.apiEndpoints())
-                    .take(CANDIDATES_PER_IDENTITY)
-                    .map { endpoint ->
-                        WarpProfileCandidate(
-                            config = WarpProfileGenerator.generate(identity, endpoint.authority, policy),
-                            endpoint = endpoint,
-                            deviceTag = identity.deviceId.takeLast(6),
-                        )
-                    }
-            }.take(MAX_TOTAL_CANDIDATES)
+            val endpoints = endpointScanner.connectionCandidates(identity.apiEndpoints())
+            endpoints.take(MAX_TOTAL_CANDIDATES).map { endpoint ->
+                WarpProfileCandidate(
+                    config = WarpProfileGenerator.generate(identity, endpoint.authority, policy),
+                    endpoint = endpoint,
+                    deviceTag = identity.deviceId.takeLast(6),
+                )
+            }
         }
     }
 
+    /** Guarantees that a valid, healthy cryptographic identity with active keys exists. */
+    suspend fun ensureVerifiedIdentity(): WarpIdentity = withContext(Dispatchers.IO) {
+        provisionMutex.withLock {
+            val identity = loadCurrentIdentity()
+            if (identity.privateKey.isNotBlank() && identity.peerPublicKey.isNotBlank() && identity.ipv4Address.isNotBlank()) {
+                return@withLock identity
+            }
+            registerNewIdentity()
+        }
+    }
+
+    /** Supplies a deterministic candidate for the continuous hunting loop at a given index. */
+    suspend fun getCandidateAt(identity: WarpIdentity, index: Int): WarpProfileCandidate = withContext(Dispatchers.IO) {
+        val endpoint = endpointScanner.getCandidateEndpointAt(index, identity.apiEndpoints())
+        val policy = policyResolver.current()
+        WarpProfileCandidate(
+            config = WarpProfileGenerator.generate(identity, endpoint.authority, policy),
+            endpoint = endpoint,
+            deviceTag = identity.deviceId.takeLast(6),
+        )
+    }
+
     suspend fun ensureIdentityPool(targetCount: Int = TARGET_IDENTITY_COUNT): Int = withContext(Dispatchers.IO) {
-        provisionMutex.withLock { ensureIdentityPoolLocked(targetCount).size }
+        provisionMutex.withLock {
+            val existing = store.loadAll().toMutableList()
+            if (existing.size < targetCount) {
+                runCatching {
+                    val identity = registerNewIdentity()
+                    if (existing.none { it.deviceId == identity.deviceId }) {
+                        existing.add(identity)
+                        store.saveAll(existing)
+                    }
+                }
+            }
+            existing.size
+        }
     }
 
     suspend fun recordEndpointSuccess(
@@ -130,11 +159,9 @@ class WarpProvisioner(context: Context) {
 
     private fun ensureIdentityPoolLocked(targetCount: Int): List<WarpIdentity> {
         val existing = store.loadAll().toMutableList()
-        if (existing.size >= targetCount) return existing
-        while (existing.size < targetCount) {
-            val identity = registerNewIdentity()
-            if (existing.none { it.deviceId == identity.deviceId }) existing.add(identity)
-        }
+        if (existing.isNotEmpty()) return existing
+        val identity = registerNewIdentity()
+        existing.add(identity)
         store.saveAll(existing)
         return existing
     }

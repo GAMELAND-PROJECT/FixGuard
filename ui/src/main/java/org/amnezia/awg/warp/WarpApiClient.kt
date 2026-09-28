@@ -2,13 +2,13 @@ package org.amnezia.awg.warp
 
 import org.amnezia.awg.crypto.KeyPair
 import org.json.JSONObject
-import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Instant
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
+import javax.net.ssl.HostnameVerifier
 
-/** Minimal, direct client for the consumer WARP registration API. */
+/** Ultra-resilient, multi-route client for the consumer WARP registration API. */
 class WarpApiClient {
     fun register(keyPair: KeyPair, model: String = "Android"): WarpIdentity {
         val body = JSONObject()
@@ -20,14 +20,14 @@ class WarpApiClient {
             .put("tos", Instant.now().toString())
             .put("type", "Android")
 
-        val response = request("$API_URL/$API_VERSION/reg", "POST", body)
+        val response = requestWithFailover("/$API_VERSION/reg", "POST", body)
         return parseIdentity(response, keyPair.privateKey.toBase64(), response.getString("token"))
     }
 
     /** Fetches the authoritative device state and latest tunnel configuration. */
     fun refresh(identity: WarpIdentity): WarpIdentity {
-        val response = request(
-            "$API_URL/$API_VERSION/reg/${identity.deviceId}",
+        val response = requestWithFailover(
+            "/$API_VERSION/reg/${identity.deviceId}",
             method = "GET",
             accessToken = identity.accessToken,
         )
@@ -68,15 +68,47 @@ class WarpApiClient {
         )
     }
 
-    private fun request(
-        url: String,
+    private fun requestWithFailover(
+        path: String,
         method: String,
         body: JSONObject? = null,
         accessToken: String? = null,
     ): JSONObject {
-        val connection = URL(url).openConnection() as HttpsURLConnection
+        var lastException: Exception? = null
+        for (baseHost in API_BASE_HOSTS) {
+            try {
+                return request(baseHost, path, method, body, accessToken)
+            } catch (apiEx: WarpApiException) {
+                // If API actively rejected with 4xx/5xx (e.g. rate limit, bad token), propagate
+                if (apiEx.statusCode in 400..499 && apiEx.statusCode != 408) {
+                    throw apiEx
+                }
+                lastException = apiEx
+            } catch (e: Exception) {
+                lastException = e
+            }
+        }
+        throw lastException ?: WarpApiException(500, "All WARP API routes failed")
+    }
+
+    private fun request(
+        baseHost: String,
+        path: String,
+        method: String,
+        body: JSONObject? = null,
+        accessToken: String? = null,
+    ): JSONObject {
+        val urlString = "$baseHost$path"
+        val connection = URL(urlString).openConnection() as HttpsURLConnection
         try {
             connection.sslSocketFactory = SSLContext.getInstance("TLSv1.2").apply { init(null, null, null) }.socketFactory
+            connection.hostnameVerifier = HostnameVerifier { hostname, session ->
+                if (DIRECT_IP_SET.contains(hostname)) {
+                    true
+                } else {
+                    HttpsURLConnection.getDefaultHostnameVerifier().verify(hostname, session)
+                }
+            }
             connection.requestMethod = method
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
@@ -85,6 +117,7 @@ class WarpApiClient {
             connection.setRequestProperty("User-Agent", "okhttp/3.12.1")
             connection.setRequestProperty("CF-Client-Version", "a-6.3-1922")
             connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Host", DEFAULT_API_DOMAIN)
             accessToken?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             body?.let { payload ->
                 connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
@@ -98,7 +131,7 @@ class WarpApiClient {
                     ?.toLongOrNull()?.times(1_000L)
                 throw WarpApiException(
                     status,
-                    message?.takeIf { it.isNotBlank() } ?: "WARP API request failed",
+                    message?.takeIf { it.isNotBlank() } ?: "WARP API request failed ($status)",
                     retryAfterMs,
                 )
             }
@@ -117,13 +150,26 @@ class WarpApiClient {
     }
 
     private companion object {
-        const val API_URL = "https://api.cloudflareclient.com"
+        const val DEFAULT_API_DOMAIN = "api.cloudflareclient.com"
         const val API_VERSION = "v0a1922"
-        // Used only if the API omits both numeric endpoint fields. Keep it numeric so tunnel
-        // discovery never needs to test or persist an endpoint hostname.
         const val DEFAULT_ENDPOINT = "162.159.192.1:2408"
-        const val CONNECT_TIMEOUT_MS = 15_000
-        const val READ_TIMEOUT_MS = 30_000
+        const val CONNECT_TIMEOUT_MS = 4_500
+        const val READ_TIMEOUT_MS = 7_000
+
+        val API_BASE_HOSTS = listOf(
+            "https://api.cloudflareclient.com",
+            "https://engage.cloudflareclient.com",
+            "https://162.159.192.1",
+            "https://162.159.193.1",
+            "https://188.114.96.1",
+            "https://188.114.97.1",
+        )
+        val DIRECT_IP_SET = setOf(
+            "162.159.192.1",
+            "162.159.193.1",
+            "188.114.96.1",
+            "188.114.97.1",
+        )
     }
 }
 
