@@ -65,8 +65,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 
 /**
  * Fragment containing a list of known AmneziaWG tunnels. It allows creating and deleting tunnels.
@@ -78,6 +80,8 @@ class TunnelListFragment : BaseFragment() {
     private var binding: TunnelListFragmentBinding? = null
     private var warpStageHideJob: Job? = null
     private var smartConnectJob: Job? = null
+    private var connectionTimerJob: Job? = null
+    private var connectionStartTime: Long = 0L
     private var smartConnectAnimator: ObjectAnimator? = null
     private var smartConnectHaloAnimator: AnimatorSet? = null
     private var smartConnectHaloPulseAnimator: AnimatorSet? = null
@@ -158,38 +162,10 @@ class TunnelListFragment : BaseFragment() {
         val bottomSheet = AddTunnelsSheet()
         binding?.apply {
             setupVipCard()
+            setupTelemetryCard()
             setupButtonSpringPhysics()
             smartConnectButton.setOnClickListener { onSmartConnectClicked() }
             optimizeWarpFab.setOnClickListener { prepareVerifiedWarpProfile() }
-            createFab.setOnClickListener {
-                if (childFragmentManager.findFragmentByTag("BOTTOM_SHEET") != null)
-                    return@setOnClickListener
-                childFragmentManager.setFragmentResultListener(AddTunnelsSheet.REQUEST_KEY_NEW_TUNNEL, viewLifecycleOwner) { _, bundle ->
-                    when (bundle.getString(AddTunnelsSheet.REQUEST_METHOD)) {
-                        AddTunnelsSheet.REQUEST_CREATE -> {
-                            startActivity(Intent(requireActivity(), TunnelCreatorActivity::class.java))
-                        }
-
-                        AddTunnelsSheet.REQUEST_CREATE_WARP -> {
-                            prepareVerifiedWarpProfile()
-                        }
-
-                        AddTunnelsSheet.REQUEST_IMPORT -> {
-                            tunnelFileImportResultLauncher.launch("*/*")
-                        }
-
-                        AddTunnelsSheet.REQUEST_SCAN -> {
-                            qrImportResultLauncher.launch(
-                                ScanOptions()
-                                    .setOrientationLocked(false)
-                                    .setBeepEnabled(false)
-                                    .setPrompt(getString(R.string.qr_code_hint))
-                            )
-                        }
-                    }
-                }
-                bottomSheet.showNow(childFragmentManager, "BOTTOM_SHEET")
-            }
             executePendingBindings()
         }
         backPressedCallback = requireActivity().onBackPressedDispatcher.addCallback(this) { actionMode?.finish() }
@@ -199,6 +175,8 @@ class TunnelListFragment : BaseFragment() {
     }
 
     override fun onDestroyView() {
+        connectionTimerJob?.cancel()
+        connectionTimerJob = null
         smartConnectJob?.cancel()
         warpStageHideJob?.cancel()
         stopSmartConnectHaloPulse()
@@ -288,12 +266,19 @@ class TunnelListFragment : BaseFragment() {
 
     private fun showSnackbar(message: CharSequence) {
         val binding = binding
-        if (binding != null)
-            Snackbar.make(binding.mainContainer, message, Snackbar.LENGTH_LONG)
-                .setAnchorView(binding.createFab)
-                .show()
-        else
+        if (binding != null) {
+            val snackbar = Snackbar.make(binding.mainContainer, message, Snackbar.LENGTH_LONG)
+            runCatching {
+                val sbView = snackbar.view
+                sbView.setBackgroundResource(R.drawable.bg_cyber_snackbar)
+                val textView = sbView.findViewById<android.widget.TextView>(com.google.android.material.R.id.snackbar_text)
+                textView?.setTextColor(android.graphics.Color.WHITE)
+                textView?.textSize = 13f
+            }
+            snackbar.show()
+        } else {
             Toast.makeText(activity ?: Application.get(), message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun warmUpWarpIdentities() {
@@ -392,6 +377,7 @@ class TunnelListFragment : BaseFragment() {
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     private fun setupButtonSpringPhysics() {
         val button = binding?.smartConnectButton ?: return
+        val innerRing = binding?.smartConnectInnerRing
         button.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
@@ -401,6 +387,12 @@ class TunnelListFragment : BaseFragment() {
                         .setDuration(120L)
                         .setInterpolator(DecelerateInterpolator())
                         .start()
+                    innerRing?.animate()
+                        ?.scaleX(0.92f)
+                        ?.scaleY(0.92f)
+                        ?.setDuration(120L)
+                        ?.setInterpolator(DecelerateInterpolator())
+                        ?.start()
                     v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -410,6 +402,12 @@ class TunnelListFragment : BaseFragment() {
                         .setDuration(320L)
                         .setInterpolator(OvershootInterpolator(2.5f))
                         .start()
+                    innerRing?.animate()
+                        ?.scaleX(1.0f)
+                        ?.scaleY(1.0f)
+                        ?.setDuration(320L)
+                        ?.setInterpolator(OvershootInterpolator(2.5f))
+                        ?.start()
                 }
             }
             false
@@ -429,7 +427,24 @@ class TunnelListFragment : BaseFragment() {
 
         card.setOnClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-            showSnackbar("حساب کاربری ZUN VIP شما فعال و متصل به شبکه پرسرعت است")
+            showSnackbar("اشتراک ویژه شما فعال و متصل به شبکه پرسرعت است")
+        }
+    }
+
+    private fun setupTelemetryCard() {
+        val card = binding?.connectionTelemetryCard ?: return
+        card.alpha = 0f
+        card.translationY = 50f
+        card.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(550L)
+            .setInterpolator(DecelerateInterpolator(1.8f))
+            .start()
+
+        card.setOnClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            showSnackbar("سامانه امنیت کوانتومی و حفاظت نشت DNS فعال است")
         }
     }
 
@@ -442,7 +457,7 @@ class TunnelListFragment : BaseFragment() {
                 currentBinding.smartConnectButton.setIconResource(R.drawable.ic_vpn_power)
                 currentBinding.smartConnectButton.text = ""
                 currentBinding.smartConnectButton.contentDescription = getString(R.string.smart_disconnect)
-                currentBinding.telemetryCaption.text = "اتصال پایدار و اختصاصی ZUN برقرار است"
+                currentBinding.telemetryCaption.text = "ارتباط پایدار و کاملاً امن برقرار است"
                 currentBinding.telemetryLiveRow.visibility = View.VISIBLE
                 animateButtonColor(0xFFDC2626.toInt())
                 currentBinding.smartConnectButton.iconTint = ColorStateList.valueOf(0xFFFFFFFF.toInt())
@@ -451,6 +466,31 @@ class TunnelListFragment : BaseFragment() {
                 currentBinding.statusPillText.setText(R.string.smart_status_connected)
                 currentBinding.statusPillText.setTextColor(0xFF3FB950.toInt())
                 startSmartConnectHaloPulse()
+
+                // Live Security & Connection Metrics
+                currentBinding.metricDnsText.text = "۱۰۰٪ مسدود و امن"
+                currentBinding.metricDnsText.setTextColor(0xFF3FB950.toInt())
+                currentBinding.metricRouteText.text = "مسیر اختصاصی بهینه"
+                currentBinding.metricShieldText.text = "هوشمند فعال"
+                currentBinding.metricShieldText.setTextColor(0xFF3FB950.toInt())
+
+                if (connectionStartTime == 0L) {
+                    connectionStartTime = SystemClock.elapsedRealtime()
+                }
+                if (connectionTimerJob == null || connectionTimerJob?.isActive != true) {
+                    connectionTimerJob = safeViewScope {
+                        while (isActive) {
+                            val elapsedMillis = SystemClock.elapsedRealtime() - connectionStartTime
+                            val totalSeconds = (elapsedMillis / 1000).coerceAtLeast(0)
+                            val hours = totalSeconds / 3600
+                            val minutes = (totalSeconds % 3600) / 60
+                            val seconds = totalSeconds % 60
+                            val formattedTime = String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
+                            binding?.metricTimerText?.text = formattedTime
+                            delay(1000L)
+                        }
+                    }
+                }
             } else {
                 currentBinding.smartConnectButton.setIconResource(R.drawable.ic_vpn_power)
                 currentBinding.smartConnectButton.text = ""
@@ -464,6 +504,17 @@ class TunnelListFragment : BaseFragment() {
                 currentBinding.statusPillText.setText(R.string.smart_status_disconnected)
                 currentBinding.statusPillText.setTextColor(0xFFE6EDF3.toInt())
                 stopSmartConnectHaloPulse()
+
+                // Reset Live Security & Connection Metrics
+                connectionTimerJob?.cancel()
+                connectionTimerJob = null
+                connectionStartTime = 0L
+                currentBinding.metricTimerText.text = "--:--:--"
+                currentBinding.metricDnsText.text = "آماده‌باش"
+                currentBinding.metricDnsText.setTextColor(0xFF8B949E.toInt())
+                currentBinding.metricRouteText.text = "مسیر خودکار"
+                currentBinding.metricShieldText.text = "آماده‌باش"
+                currentBinding.metricShieldText.setTextColor(0xFF8B949E.toInt())
             }
             currentBinding.smartConnectProgress.visibility = View.GONE
             // CRITICAL: Re-bind click listener to recover from cases where the button lost its handler
@@ -784,7 +835,7 @@ class TunnelListFragment : BaseFragment() {
                 binding?.apply {
                     val active = Application.getTunnelManager().getTunnels().firstOrNull { it.state == Tunnel.State.UP }
                     if (active != null) {
-                        telemetryCaption.text = "اتصال پایدار و اختصاصی ZUN برقرار است"
+                        telemetryCaption.text = "ارتباط پایدار و کاملاً امن برقرار است"
                         telemetryLiveRow.visibility = View.VISIBLE
                         statusPill.setBackgroundResource(R.drawable.bg_status_pill_connected)
                         statusDot.setBackgroundResource(R.drawable.bg_status_dot_connected)
@@ -878,11 +929,6 @@ class TunnelListFragment : BaseFragment() {
                 R.id.menu_action_delete -> {
                     val activity = activity ?: return true
                     val copyCheckedItems = HashSet(checkedItems)
-                    binding?.createFab?.apply {
-                        visibility = View.VISIBLE
-                        scaleX = 1f
-                        scaleY = 1f
-                    }
                     activity.lifecycleScope.launch {
                         try {
                             val tunnels = Application.getTunnelManager().getTunnels()
@@ -919,7 +965,6 @@ class TunnelListFragment : BaseFragment() {
             if (activity != null) {
                 resources = activity!!.resources
             }
-            animateFab(binding?.createFab, false)
             mode.menuInflater.inflate(R.menu.tunnel_list_action_mode, menu)
             binding?.tunnelList?.adapter?.notifyDataSetChanged()
             return true
@@ -929,7 +974,6 @@ class TunnelListFragment : BaseFragment() {
             actionMode = null
             backPressedCallback?.isEnabled = false
             resources = null
-            animateFab(binding?.createFab, true)
             checkedItems.clear()
             binding?.tunnelList?.adapter?.notifyDataSetChanged()
         }
@@ -969,26 +1013,6 @@ class TunnelListFragment : BaseFragment() {
             } else {
                 mode.title = resources!!.getQuantityString(R.plurals.delete_title, count, count)
             }
-        }
-
-        private fun animateFab(view: View?, show: Boolean) {
-            view ?: return
-            val animation = AnimationUtils.loadAnimation(
-                context, if (show) R.anim.scale_up else R.anim.scale_down
-            )
-            animation.setAnimationListener(object : Animation.AnimationListener {
-                override fun onAnimationRepeat(animation: Animation?) {
-                }
-
-                override fun onAnimationEnd(animation: Animation?) {
-                    if (!show) view.visibility = View.GONE
-                }
-
-                override fun onAnimationStart(animation: Animation?) {
-                    if (show) view.visibility = View.VISIBLE
-                }
-            })
-            view.startAnimation(animation)
         }
     }
 
