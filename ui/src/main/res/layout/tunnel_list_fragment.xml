@@ -200,9 +200,17 @@
                         android:clipChildren="false"
                         android:clipToPadding="false">
 
-                        <!-- Expanding radar pulse wave (layer 1) -->
+                        <!-- Expanding radar pulse waves (layers 1a & 1b) -->
                         <View
                             android:id="@+id/smart_connect_halo_pulse"
+                            android:layout_width="276dp"
+                            android:layout_height="276dp"
+                            android:layout_gravity="center"
+                            android:alpha="0.0"
+                            android:background="@drawable/bg_smart_button_halo_secondary" />
+
+                        <View
+                            android:id="@+id/smart_connect_halo_pulse_2"
                             android:layout_width="276dp"
                             android:layout_height="276dp"
                             android:layout_gravity="center"
@@ -218,7 +226,7 @@
                             android:alpha="0.18"
                             android:background="@drawable/bg_smart_button_halo" />
 
-                        <!-- Metallic / Cyber outer frame bezel (layer 3) -->
+                        <!-- Metallic / Cyber outer frame bezel (layer 3 - rotating clockwise) -->
                         <View
                             android:id="@+id/smart_connect_bezel"
                             android:layout_width="232dp"
@@ -242,7 +250,6 @@
                         <!-- Centerpiece Power Switch (layer 5) -->
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/smart_connect_button"
-                            style="@style/Widget.Material3.Button.Icon"
                             android:layout_width="206dp"
                             android:layout_height="206dp"
                             android:layout_gravity="center"
@@ -252,17 +259,16 @@
                             android:insetTop="0dp"
                             android:insetRight="0dp"
                             android:insetBottom="0dp"
+                            android:padding="0dp"
                             android:stateListAnimator="@null"
                             android:text=""
                             app:cornerRadius="103dp"
-                            app:icon="@drawable/ic_vpn_power"
-                            app:iconGravity="textStart"
+                            app:icon="@null"
                             app:iconPadding="0dp"
-                            app:iconSize="68dp"
-                            app:iconTint="#FFFFFF"
+                            app:iconSize="0dp"
                             app:rippleColor="#58A6FF" />
 
-                        <!-- Concentric Cyber Ring Pattern (layer 6) -->
+                        <!-- Concentric Cyber Ring Pattern (layer 6 - rotating counter-clockwise) -->
                         <View
                             android:id="@+id/smart_connect_inner_ring"
                             android:layout_width="152dp"
@@ -271,6 +277,19 @@
                             android:background="@drawable/bg_cyber_inner_ring"
                             android:clickable="false"
                             android:focusable="false" />
+
+                        <!-- Centerpiece Mathematically Centered Power Icon (layer 7) -->
+                        <ImageView
+                            android:id="@+id/smart_connect_icon"
+                            android:layout_width="68dp"
+                            android:layout_height="68dp"
+                            android:layout_gravity="center"
+                            android:clickable="false"
+                            android:focusable="false"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_vpn_power"
+                            app:tint="#FFFFFF"
+                            android:contentDescription="@string/smart_connect" />
                     </FrameLayout>
                 </LinearLayout>
 

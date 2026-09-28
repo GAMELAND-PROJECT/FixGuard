@@ -85,6 +85,9 @@ class TunnelListFragment : BaseFragment() {
     private var smartConnectAnimator: ObjectAnimator? = null
     private var smartConnectHaloAnimator: AnimatorSet? = null
     private var smartConnectHaloPulseAnimator: AnimatorSet? = null
+    private var smartConnectHaloPulse2Animator: AnimatorSet? = null
+    private var outerBezelAnimator: ObjectAnimator? = null
+    private var innerRingAnimator: ObjectAnimator? = null
     private var buttonColorAnimator: ValueAnimator? = null
     private var lastButtonColor: Int = 0xFF1F6FEB.toInt()
     private var isSmartConnecting = false
@@ -164,6 +167,9 @@ class TunnelListFragment : BaseFragment() {
             setupVipCard()
             setupTelemetryCard()
             setupButtonSpringPhysics()
+            smartConnectButton.icon = null
+            smartConnectButton.setIconResource(0)
+            stopCyberGyroscopicRotation()
             smartConnectButton.setOnClickListener { onSmartConnectClicked() }
             optimizeWarpFab.setOnClickListener { prepareVerifiedWarpProfile() }
             executePendingBindings()
@@ -180,6 +186,7 @@ class TunnelListFragment : BaseFragment() {
         smartConnectJob?.cancel()
         warpStageHideJob?.cancel()
         stopSmartConnectHaloPulse()
+        stopCyberGyroscopicRotation()
         stopSmartConnectAnimation()
         buttonColorAnimator?.cancel()
         buttonColorAnimator = null
@@ -269,11 +276,16 @@ class TunnelListFragment : BaseFragment() {
         if (binding != null) {
             val snackbar = Snackbar.make(binding.mainContainer, message, Snackbar.LENGTH_LONG)
             runCatching {
+                snackbar.setBackgroundTint(0xFF161B22.toInt())
+                snackbar.setTextColor(0xFFFFFFFF.toInt())
                 val sbView = snackbar.view
                 sbView.setBackgroundResource(R.drawable.bg_cyber_snackbar)
+                sbView.backgroundTintList = ColorStateList.valueOf(0xFF161B22.toInt())
                 val textView = sbView.findViewById<android.widget.TextView>(com.google.android.material.R.id.snackbar_text)
-                textView?.setTextColor(android.graphics.Color.WHITE)
-                textView?.textSize = 13f
+                textView?.setTextColor(0xFFFFFFFF.toInt())
+                textView?.textSize = 13.5f
+                textView?.typeface = android.graphics.Typeface.DEFAULT_BOLD
+                textView?.textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER
             }
             snackbar.show()
         } else {
@@ -378,6 +390,7 @@ class TunnelListFragment : BaseFragment() {
     private fun setupButtonSpringPhysics() {
         val button = binding?.smartConnectButton ?: return
         val innerRing = binding?.smartConnectInnerRing
+        val icon = binding?.smartConnectIcon
         button.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
@@ -393,6 +406,12 @@ class TunnelListFragment : BaseFragment() {
                         ?.setDuration(120L)
                         ?.setInterpolator(DecelerateInterpolator())
                         ?.start()
+                    icon?.animate()
+                        ?.scaleX(0.92f)
+                        ?.scaleY(0.92f)
+                        ?.setDuration(120L)
+                        ?.setInterpolator(DecelerateInterpolator())
+                        ?.start()
                     v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -403,6 +422,12 @@ class TunnelListFragment : BaseFragment() {
                         .setInterpolator(OvershootInterpolator(2.5f))
                         .start()
                     innerRing?.animate()
+                        ?.scaleX(1.0f)
+                        ?.scaleY(1.0f)
+                        ?.setDuration(320L)
+                        ?.setInterpolator(OvershootInterpolator(2.5f))
+                        ?.start()
+                    icon?.animate()
                         ?.scaleX(1.0f)
                         ?.scaleY(1.0f)
                         ?.setDuration(320L)
@@ -454,18 +479,21 @@ class TunnelListFragment : BaseFragment() {
             if (isSmartConnecting) return@safeViewScope
             val active = Application.getTunnelManager().getTunnels().firstOrNull { it.state == Tunnel.State.UP }
             if (active != null) {
-                currentBinding.smartConnectButton.setIconResource(R.drawable.ic_vpn_power)
+                currentBinding.smartConnectButton.icon = null
+                currentBinding.smartConnectButton.setIconResource(0)
                 currentBinding.smartConnectButton.text = ""
                 currentBinding.smartConnectButton.contentDescription = getString(R.string.smart_disconnect)
                 currentBinding.telemetryCaption.text = "ارتباط پایدار و کاملاً امن برقرار است"
                 currentBinding.telemetryLiveRow.visibility = View.VISIBLE
                 animateButtonColor(0xFFDC2626.toInt())
-                currentBinding.smartConnectButton.iconTint = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+                currentBinding.smartConnectIcon.setImageResource(R.drawable.ic_vpn_power)
+                currentBinding.smartConnectIcon.imageTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
                 currentBinding.statusPill.setBackgroundResource(R.drawable.bg_status_pill_connected)
                 currentBinding.statusDot.setBackgroundResource(R.drawable.bg_status_dot_connected)
                 currentBinding.statusPillText.setText(R.string.smart_status_connected)
                 currentBinding.statusPillText.setTextColor(0xFF3FB950.toInt())
                 startSmartConnectHaloPulse()
+                startCyberGyroscopicRotation(isFast = false)
 
                 // Live Security & Connection Metrics
                 currentBinding.metricDnsText.text = "۱۰۰٪ مسدود و امن"
@@ -492,18 +520,20 @@ class TunnelListFragment : BaseFragment() {
                     }
                 }
             } else {
-                currentBinding.smartConnectButton.setIconResource(R.drawable.ic_vpn_power)
-                currentBinding.smartConnectButton.text = ""
+                currentBinding.smartConnectButton.icon = null
+                currentBinding.smartConnectButton.setIconResource(0)
+                currentBinding.smartConnectIcon.setImageResource(R.drawable.ic_vpn_power)
                 currentBinding.smartConnectButton.contentDescription = getString(R.string.smart_connect)
                 currentBinding.telemetryCaption.setText(R.string.smart_connect_ready)
                 currentBinding.telemetryLiveRow.visibility = View.GONE
                 animateButtonColor(0xFF1F6FEB.toInt())
-                currentBinding.smartConnectButton.iconTint = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+                currentBinding.smartConnectIcon.imageTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
                 currentBinding.statusPill.setBackgroundResource(R.drawable.bg_status_pill)
                 currentBinding.statusDot.setBackgroundResource(R.drawable.bg_status_dot_disconnected)
                 currentBinding.statusPillText.setText(R.string.smart_status_disconnected)
                 currentBinding.statusPillText.setTextColor(0xFFE6EDF3.toInt())
                 stopSmartConnectHaloPulse()
+                stopCyberGyroscopicRotation()
 
                 // Reset Live Security & Connection Metrics
                 connectionTimerJob?.cancel()
@@ -528,8 +558,9 @@ class TunnelListFragment : BaseFragment() {
         isSmartConnecting = busy
         binding?.apply {
             smartConnectButton.isEnabled = !busy
-            smartConnectButton.setIconResource(R.drawable.ic_vpn_power)
-            smartConnectButton.text = ""
+            smartConnectButton.icon = null
+            smartConnectButton.setIconResource(0)
+            smartConnectIcon.setImageResource(R.drawable.ic_vpn_power)
             smartConnectButton.contentDescription = getString(if (busy) R.string.smart_connecting else R.string.smart_connect)
             caption?.let { telemetryCaption.text = it } ?: run {
                 telemetryCaption.setText(if (busy) R.string.smart_connecting else R.string.smart_connect_ready)
@@ -546,17 +577,27 @@ class TunnelListFragment : BaseFragment() {
                 smartConnectProgress.visibility = View.VISIBLE
                 startSmartConnectAnimation()
                 stopSmartConnectHaloPulse()
+                startCyberGyroscopicRotation(isFast = true)
                 smartConnectHalo.animate().alpha(0.28f).setDuration(200L).start()
             } else {
                 smartConnectProgress.visibility = View.GONE
                 stopSmartConnectAnimation()
+                safeViewScope {
+                    val active = Application.getTunnelManager().getTunnels().firstOrNull { it.state == Tunnel.State.UP }
+                    if (active != null) {
+                        startCyberGyroscopicRotation(isFast = false)
+                    } else {
+                        stopCyberGyroscopicRotation()
+                    }
+                } ?: stopCyberGyroscopicRotation()
             }
         }
     }
 
     private fun startSmartConnectHaloPulse() {
         val halo = binding?.smartConnectHalo ?: return
-        val pulse = binding?.smartConnectHaloPulse ?: return
+        val pulse1 = binding?.smartConnectHaloPulse ?: return
+        val pulse2 = binding?.smartConnectHaloPulse2 ?: return
         if (smartConnectHaloAnimator != null) return
 
         // 1. Inner breathing halo (subtle glow expansion)
@@ -582,24 +623,46 @@ class TunnelListFragment : BaseFragment() {
             start()
         }
 
-        // 2. Outer radar wave pulse
-        pulse.visibility = View.VISIBLE
-        val pulseAlpha = ObjectAnimator.ofFloat(pulse, View.ALPHA, 0.38f, 0.0f).apply {
+        // 2. Primary outer pulse wave radiating outwards
+        pulse1.visibility = View.VISIBLE
+        val pulse1Alpha = ObjectAnimator.ofFloat(pulse1, View.ALPHA, 0.52f, 0.0f).apply {
             repeatCount = ObjectAnimator.INFINITE
             repeatMode = ObjectAnimator.RESTART
         }
-        val pulseScaleX = ObjectAnimator.ofFloat(pulse, View.SCALE_X, 1.0f, 1.34f).apply {
+        val pulse1ScaleX = ObjectAnimator.ofFloat(pulse1, View.SCALE_X, 1.0f, 1.48f).apply {
             repeatCount = ObjectAnimator.INFINITE
             repeatMode = ObjectAnimator.RESTART
         }
-        val pulseScaleY = ObjectAnimator.ofFloat(pulse, View.SCALE_Y, 1.0f, 1.34f).apply {
+        val pulse1ScaleY = ObjectAnimator.ofFloat(pulse1, View.SCALE_Y, 1.0f, 1.48f).apply {
             repeatCount = ObjectAnimator.INFINITE
             repeatMode = ObjectAnimator.RESTART
         }
         smartConnectHaloPulseAnimator = AnimatorSet().apply {
-            playTogether(pulseAlpha, pulseScaleX, pulseScaleY)
-            duration = 2_000L
-            interpolator = DecelerateInterpolator()
+            playTogether(pulse1Alpha, pulse1ScaleX, pulse1ScaleY)
+            duration = 2_200L
+            interpolator = DecelerateInterpolator(1.2f)
+            start()
+        }
+
+        // 3. Staggered secondary pulse wave radiating outwards
+        pulse2.visibility = View.VISIBLE
+        val pulse2Alpha = ObjectAnimator.ofFloat(pulse2, View.ALPHA, 0.52f, 0.0f).apply {
+            repeatCount = ObjectAnimator.INFINITE
+            repeatMode = ObjectAnimator.RESTART
+        }
+        val pulse2ScaleX = ObjectAnimator.ofFloat(pulse2, View.SCALE_X, 1.0f, 1.48f).apply {
+            repeatCount = ObjectAnimator.INFINITE
+            repeatMode = ObjectAnimator.RESTART
+        }
+        val pulse2ScaleY = ObjectAnimator.ofFloat(pulse2, View.SCALE_Y, 1.0f, 1.48f).apply {
+            repeatCount = ObjectAnimator.INFINITE
+            repeatMode = ObjectAnimator.RESTART
+        }
+        smartConnectHaloPulse2Animator = AnimatorSet().apply {
+            playTogether(pulse2Alpha, pulse2ScaleX, pulse2ScaleY)
+            duration = 2_200L
+            startDelay = 1_100L
+            interpolator = DecelerateInterpolator(1.2f)
             start()
         }
     }
@@ -609,6 +672,8 @@ class TunnelListFragment : BaseFragment() {
         smartConnectHaloAnimator = null
         smartConnectHaloPulseAnimator?.cancel()
         smartConnectHaloPulseAnimator = null
+        smartConnectHaloPulse2Animator?.cancel()
+        smartConnectHaloPulse2Animator = null
         binding?.smartConnectHalo?.apply {
             scaleX = 1.0f
             scaleY = 1.0f
@@ -618,7 +683,54 @@ class TunnelListFragment : BaseFragment() {
             scaleX = 1.0f
             scaleY = 1.0f
             alpha = 0.0f
+            visibility = View.GONE
         }
+        binding?.smartConnectHaloPulse2?.apply {
+            scaleX = 1.0f
+            scaleY = 1.0f
+            alpha = 0.0f
+            visibility = View.GONE
+        }
+    }
+
+    private fun startCyberGyroscopicRotation(isFast: Boolean = false) {
+        val bezel = binding?.smartConnectBezel ?: return
+        val innerRing = binding?.smartConnectInnerRing ?: return
+        val outerDuration = if (isFast) 4_500L else 22_000L
+        val innerDuration = if (isFast) 3_500L else 16_000L
+
+        if (outerBezelAnimator == null) {
+            outerBezelAnimator = ObjectAnimator.ofFloat(bezel, View.ROTATION, 0f, 360f).apply {
+                duration = outerDuration
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                start()
+            }
+        } else {
+            outerBezelAnimator?.duration = outerDuration
+            if (outerBezelAnimator?.isStarted != true) outerBezelAnimator?.start()
+        }
+
+        if (innerRingAnimator == null) {
+            innerRingAnimator = ObjectAnimator.ofFloat(innerRing, View.ROTATION, 360f, 0f).apply {
+                duration = innerDuration
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                start()
+            }
+        } else {
+            innerRingAnimator?.duration = innerDuration
+            if (innerRingAnimator?.isStarted != true) innerRingAnimator?.start()
+        }
+    }
+
+    private fun stopCyberGyroscopicRotation() {
+        outerBezelAnimator?.cancel()
+        outerBezelAnimator = null
+        innerRingAnimator?.cancel()
+        innerRingAnimator = null
+        binding?.smartConnectBezel?.animate()?.rotation(0f)?.setDuration(350L)?.start()
+        binding?.smartConnectInnerRing?.animate()?.rotation(0f)?.setDuration(350L)?.start()
     }
 
     private fun startSmartConnectAnimation() {

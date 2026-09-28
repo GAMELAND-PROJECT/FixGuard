@@ -9,7 +9,14 @@
         <item name="materialCardViewStyle">@style/AmneziaWgTheme.MaterialCardView</item>
         <item name="toolbarStyle">@style/AmneziaWgTheme.Toolbar</item>
         <item name="bottomSheetDialogTheme">@style/AmneziaWgTheme.BottomSheetDialog</item>
+        <item name="snackbarStyle">@style/Widget.App.Snackbar</item>
         <item name="android:statusBarColor">@null</item>
+    </style>
+
+    <style name="Widget.App.Snackbar" parent="Widget.Material3.Snackbar">
+        <item name="backgroundTint">#161B22</item>
+        <item name="android:backgroundTint">#161B22</item>
+        <item name="android:textColor">#FFFFFF</item>
     </style>
 
     <!-- Various additional API-specific features in values-v*/styles.xml -->
